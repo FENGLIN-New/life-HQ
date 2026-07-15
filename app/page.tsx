@@ -1,6 +1,16 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { createClient } from '@supabase/supabase-js';
+
+// 初始化 Supabase 前端客戶端（使用 anon_key，供讀取與即時監聽）
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+
+const supabase =
+  supabaseUrl && supabaseAnonKey
+    ? createClient(supabaseUrl, supabaseAnonKey)
+    : null;
 
 interface ProjectItem {
   id: string;
@@ -29,7 +39,6 @@ interface SystemState {
   memos: MemoItem[];
 }
 
-// 精心挑選的高顏值馬卡龍色彩對照表，為每個顏色指定一個完美的漸層搭配色與霓虹陰影色
 const COLOR_MAPS: Record<string, { from: string; to: string; shadow: string }> = {
   '#FFB4B4': { from: '#FFB4B4', to: '#FFD3D3', shadow: 'rgba(255, 180, 180, 0.4)' },
   '#FFDEB4': { from: '#FFDEB4', to: '#FFEED6', shadow: 'rgba(255, 222, 180, 0.4)' },
@@ -39,7 +48,6 @@ const COLOR_MAPS: Record<string, { from: string; to: string; shadow: string }> =
   '#FFCCB6': { from: '#FFCCB6', to: '#FFE5D9', shadow: 'rgba(255, 204, 182, 0.4)' },
   '#D4A5B8': { from: '#D4A5B8', to: '#E8C5D4', shadow: 'rgba(212, 165, 184, 0.4)' },
   '#B39CD0': { from: '#B39CD0', to: '#D2C4E6', shadow: 'rgba(179, 156, 208, 0.4)' },
-  // 相容舊的色彩
   '#FEC8D8': { from: '#FEC8D8', to: '#FFF0F5', shadow: 'rgba(254, 200, 216, 0.4)' },
   '#D4F0F0': { from: '#D4F0F0', to: '#E6FAFA', shadow: 'rgba(212, 240, 240, 0.4)' },
   '#CCE2CB': { from: '#CCE2CB', to: '#E2F0E1', shadow: 'rgba(204, 226, 203, 0.4)' },
@@ -72,6 +80,12 @@ export default function Home() {
   const [newMemoText, setNewMemoText] = useState('');
   const [apiEnglishWord, setApiEnglishWord] = useState({ word: 'Loading...', detail: '正在載入今日高頻新聞英文...' });
   const [apiThaiWord, setApiThaiWord] = useState({ word: 'Loading...', detail: '正在載入今日商業泰語...' });
+  
+  // 專門存放 Supabase 雲端同步下來的 LINE 靈感便簽
+  const [supabaseMemos, setSupabaseMemos] = useState<MemoItem[]>([]);
+  
+  // 客製化刪除防呆確認窗
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   const [systemState, setSystemState] = useState<SystemState>({
     workTitle: '工作領域',
@@ -112,6 +126,7 @@ export default function Home() {
   useEffect(() => {
     document.title = "Life HQ-我的小宇宙";
 
+    // 1. 先載入本機 LocalStorage 儲存的狀態
     const savedNew = localStorage.getItem('life_hq_user_universe_data');
     if (savedNew) {
       try {
@@ -125,6 +140,58 @@ export default function Home() {
     }
     setIsInitialized(true);
     fetchDailyWords();
+
+    // 2. 如果 Supabase 設定成功，抓取雲端 ideas 表格的歷史訊息
+    if (!supabase) return;
+
+    const fetchSupabaseIdeas = async () => {
+      const { data, error } = await supabase
+        .from('ideas')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('抓取雲端靈感失敗:', error.message);
+      } else if (data) {
+        // 將雲端資料庫的 ideas 轉換成網頁能顯示的 Memo 格式
+        const cloudMemos: MemoItem[] = data.map((item: any) => ({
+          id: `sb-${item.id}`, // 使用 sb- 前綴做識別
+          text: `🛸 ${item.text}`, // 太空船小標記
+          color: '#B5EAEA'
+        }));
+        setSupabaseMemos(cloudMemos);
+      }
+    };
+
+    fetchSupabaseIdeas();
+
+    // 🚀 3. 開啟 Supabase Realtime 神奇即時監聽！只要 ideas 表格一塞進新資料，立刻同步到畫面上！
+    const channel = supabase
+      .channel('schema-db-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'ideas',
+        },
+        (payload) => {
+          console.log('偵測到 LINE 送來了新靈感！', payload.new);
+          const newIdea = payload.new as { id: number; text: string };
+          const freshMemo: MemoItem = {
+            id: `sb-${newIdea.id}`,
+            text: `🛸 ${newIdea.text}`,
+            color: '#FFB4B4' // 閃亮降落卡片使用甜美馬卡龍粉色
+          };
+          // 塞進狀態最前端，卡片就會像魔法一樣「叮咚」瞬間跳出來
+          setSupabaseMemos((prev) => [freshMemo, ...prev]);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const handleAddProject = (zone: 'work' | 'personal' | 'mind') => {
@@ -150,16 +217,24 @@ export default function Home() {
     setActiveProjectId(newId);
   };
 
-  const handleDeleteProject = (id: string, e: React.MouseEvent) => {
+  // 打開客製化確認視窗取代 confirm
+  const triggerDeleteProject = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (confirm('確定要刪除這個方塊嗎？')) {
-      setSystemState(prev => {
-        const updated = { ...prev, projects: prev.projects.filter(p => p.id !== id) };
-        saveToLocalStorage(updated);
-        return updated;
-      });
-      if (activeProjectId === id) setActiveProjectId(null);
-    }
+    setDeleteConfirmId(id);
+  };
+
+  const handleConfirmDelete = () => {
+    if (!deleteConfirmId) return;
+    const id = deleteConfirmId;
+    
+    setSystemState(prev => {
+      const updated = { ...prev, projects: prev.projects.filter(p => p.id !== id) };
+      saveToLocalStorage(updated);
+      return updated;
+    });
+    
+    if (activeProjectId === id) setActiveProjectId(null);
+    setDeleteConfirmId(null);
   };
 
   const handleProjectUpdate = (id: string, fields: Partial<ProjectItem>) => {
@@ -192,12 +267,26 @@ export default function Home() {
     setNewMemoText('');
   };
 
-  const handleDeleteMemo = (id: string) => {
-    setSystemState(prev => {
-      const updated = { ...prev, memos: (prev.memos || []).filter(m => m.id !== id) };
-      saveToLocalStorage(updated);
-      return updated;
-    });
+  const handleDeleteMemo = async (id: string) => {
+    // 如果是 Supabase 的雲端訊息，點擊刪除時一併清理雲端資料庫
+    if (id.startsWith('sb-')) {
+      const rawId = id.replace('sb-', '');
+      setSupabaseMemos(prev => prev.filter(m => m.id !== id));
+      
+      if (supabase) {
+        const { error } = await supabase
+          .from('ideas')
+          .delete()
+          .eq('id', rawId);
+        if (error) console.error('自 Supabase 雲端刪除失敗:', error.message);
+      }
+    } else {
+      setSystemState(prev => {
+        const updated = { ...prev, memos: (prev.memos || []).filter(m => m.id !== id) };
+        saveToLocalStorage(updated);
+        return updated;
+      });
+    }
   };
 
   const [draggedId, setDraggedId] = useState<string | null>(null);
@@ -238,6 +327,8 @@ export default function Home() {
   if (!isInitialized) {
     return <div className="h-screen w-screen bg-[#FFF0F2] flex items-center justify-center text-slate-400 font-mono text-xs tracking-widest">MY_UNIVERSE INITIALIZING...</div>;
   }
+
+  const combinedMemos = [...supabaseMemos, ...(systemState.memos || [])];
 
   const displayedProjects = systemState.projects.filter(p => p.belongsTo === currentView);
   const workCount = systemState.projects.filter(p => p.belongsTo === 'work').length;
@@ -326,7 +417,7 @@ export default function Home() {
               </div>
             </div>
 
-            {/* 右側：時光便簽壁 + 學習單字 */}
+            {}
             <div className="lg:col-span-5 bg-white/70 backdrop-blur-md border border-white/50 rounded-2xl p-6 shadow-sm flex flex-col justify-between min-h-[480px]">
               <div className="space-y-6">
                 <div>
@@ -344,9 +435,21 @@ export default function Home() {
                 </div>
 
                 <div>
-                  <h2 className="text-xs font-semibold text-slate-400 tracking-wider mb-2 uppercase">時光便簽壁</h2>
+                  <div className="flex justify-between items-center mb-2">
+                    <h2 className="text-xs font-semibold text-slate-400 tracking-wider uppercase">時光便簽壁</h2>
+                    {supabase ? (
+                      <span className="text-[10px] text-emerald-500 font-mono flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100 animate-pulse">
+                        🟢 LINE 即時同步中
+                      </span>
+                    ) : (
+                      <span className="text-[10px] text-amber-500 font-mono bg-amber-50 px-2 py-0.5 rounded-full border border-amber-100">
+                        ⚠️ 雲端未設定
+                      </span>
+                    )}
+                  </div>
+                  
                   <div className="space-y-2.5 max-h-[180px] overflow-y-auto pr-1">
-                    {systemState.memos.map(memo => (
+                    {combinedMemos.map(memo => (
                       <div key={memo.id} className="p-3.5 rounded-xl bg-white/90 text-xs text-slate-700 border border-slate-100 relative group flex justify-between items-start leading-relaxed shadow-sm">
                         <span className="flex-1 pr-4 font-light">{memo.text}</span>
                         <button onClick={() => handleDeleteMemo(memo.id)} className="text-[10px] text-slate-300 hover:text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity font-mono shrink-0">刪除</button>
@@ -393,7 +496,6 @@ export default function Home() {
             {/* 💡 滿版通透漸層色塊網格 */}
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6 pt-2">
               {displayedProjects.map(project => {
-                // 讀取相對應的漸層配色設定，若無則提供安全預設
                 const colorSetup = COLOR_MAPS[project.color] || { from: project.color, to: project.color, shadow: 'rgba(0,0,0,0.05)' };
                 
                 return (
@@ -406,13 +508,11 @@ export default function Home() {
                     onClick={() => setActiveProjectId(project.id)}
                     className="cursor-grab active:cursor-grabbing rounded-2xl p-5 flex flex-col justify-between min-h-[160px] transition-all hover:-translate-y-1 duration-300 group relative select-none overflow-hidden border border-white/30 backdrop-blur-md"
                     style={{ 
-                      // 1. 整個色塊重回滿版上色：採用高質感的溫潤馬卡龍微幅雙色漸層
                       background: `linear-gradient(135deg, ${colorSetup.from}ee, ${colorSetup.to}cc)`,
-                      // 2. 拔除髒黑邊框，改用與卡片同色系的霓虹柔和彩色陰影
                       boxShadow: `0 10px 25px -5px ${colorSetup.shadow}, 0 4px 12px -4px ${colorSetup.shadow}`
                     }}
                   >
-                    <button onClick={(e) => handleDeleteProject(project.id, e)} className="absolute top-4 right-4 text-slate-500 hover:text-slate-800 text-xs opacity-0 group-hover:opacity-100 transition-opacity font-medium z-10">刪除</button>
+                    <button onClick={(e) => triggerDeleteProject(project.id, e)} className="absolute top-4 right-4 text-slate-500 hover:text-slate-800 text-xs opacity-0 group-hover:opacity-100 transition-opacity font-medium z-10">刪除</button>
                     
                     <div className="space-y-2.5 w-full h-full pointer-events-none pt-1"> 
                       <span className="text-md font-bold tracking-tight block text-slate-800 leading-snug">{project.name}</span>
@@ -425,7 +525,7 @@ export default function Home() {
           </div>
         )}
 
-        {/* 彈窗主控台 */}
+        {}
         {activeProjectId && currentProject && (
           <div className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
             <div className="bg-white rounded-2xl max-w-xl w-full p-6 relative shadow-2xl overflow-hidden border border-slate-100">
@@ -462,6 +562,25 @@ export default function Home() {
                     <option value="mind">移至 知識庫</option>
                   </select>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 客製化馬卡龍刪除防呆彈窗 (取代危險的 confirm) */}
+        {deleteConfirmId && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn">
+            <div className="bg-white rounded-2xl max-w-sm w-full p-6 text-center shadow-2xl border border-slate-100">
+              <span className="text-4xl mb-3 block">🌸</span>
+              <h3 className="text-md font-bold text-slate-800 mb-2">確定要刪除這個馬卡龍方塊嗎？</h3>
+              <p className="text-slate-400 text-xs mb-6">此動作將永久移除，無法再還原喔！</p>
+              <div className="flex gap-3 justify-center">
+                <button onClick={() => setDeleteConfirmId(null)} className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs transition-colors font-medium">
+                  取消
+                </button>
+                <button onClick={handleConfirmDelete} className="px-4 py-2 rounded-xl bg-pink-500 hover:bg-pink-600 text-white text-xs transition-colors font-medium shadow-sm">
+                  確認刪除
+                </button>
               </div>
             </div>
           </div>
