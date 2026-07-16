@@ -3,579 +3,393 @@
 import React, { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
+// 1. 初始化 Supabase 用戶端 (防錯機制)
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+const supabase = supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null;
 
-const supabase =
-  supabaseUrl && supabaseAnonKey
-    ? createClient(supabaseUrl, supabaseAnonKey)
-    : null;
-
-interface TodoItem {
+// 2. 定義資料結構與型別
+interface Item {
   id: string;
   text: string;
   completed: boolean;
+  type: 'todo' | 'note';
+  createdAt: string;
 }
 
-interface ProjectItem {
+interface Project {
   id: string;
   name: string;
-  desc: string;
-  belongsTo: 'work' | 'personal' | 'mind';
+  icon: string;
   color: string;
-  notes: string;
-  link: string;
-  todos?: TodoItem[];
-}
-
-interface MemoItem {
-  id: string;
-  text: string;
-  color: string;
+  items: Item[];
 }
 
 interface SystemState {
-  workTitle: string;
-  workDesc: string;
-  personalTitle: string;
-  personalDesc: string;
-  mindTitle: string;
-  mindDesc: string;
-  projects: ProjectItem[];
-  memos: MemoItem[];
+  projects: Project[];
+  activeProjectId: string | null;
+  activeItemType: 'todo' | 'note';
 }
 
-const COLOR_MAPS: Record<string, { from: string; to: string; shadow: string }> = {
-  '#FFB4B4': { from: '#FFB4B4', to: '#FFD3D3', shadow: 'rgba(255, 180, 180, 0.4)' },
-  '#FFDEB4': { from: '#FFDEB4', to: '#FFEED6', shadow: 'rgba(255, 222, 180, 0.4)' },
-  '#FDFDBD': { from: '#FDFDBD', to: '#FFFFE0', shadow: 'rgba(253, 253, 189, 0.4)' },
-  '#B5EAEA': { from: '#B5EAEA', to: '#D7F7F7', shadow: 'rgba(181, 234, 234, 0.4)' },
-  '#EDF6E8': { from: '#EDF6E8', to: '#F7FCF5', shadow: 'rgba(237, 246, 232, 0.3)' },
-  '#FFCCB6': { from: '#FFCCB6', to: '#FFE5D9', shadow: 'rgba(255, 204, 182, 0.4)' },
-  '#D4A5B8': { from: '#D4A5B8', to: '#E8C5D4', shadow: 'rgba(212, 165, 184, 0.4)' },
-  '#B39CD0': { from: '#B39CD0', to: '#D2C4E6', shadow: 'rgba(179, 156, 208, 0.4)' },
-  '#FEC8D8': { from: '#FEC8D8', to: '#FFF0F5', shadow: 'rgba(254, 200, 216, 0.4)' },
-  '#D4F0F0': { from: '#D4F0F0', to: '#E6FAFA', shadow: 'rgba(212, 240, 240, 0.4)' },
-  '#CCE2CB': { from: '#CCE2CB', to: '#E2F0E1', shadow: 'rgba(204, 226, 203, 0.4)' },
-  '#FFDFD3': { from: '#FFDFD3', to: '#FFF0EA', shadow: 'rgba(255, 223, 211, 0.4)' },
-  '#E8AEB7': { from: '#E8AEB7', to: '#F4C2C2', shadow: 'rgba(232, 174, 183, 0.4)' },
-  '#B7CFB7': { from: '#B7CFB7', to: '#D3E2D3', shadow: 'rgba(183, 207, 183, 0.4)' },
-  '#D7C49E': { from: '#D7C49E', to: '#E8DCBF', shadow: 'rgba(215, 196, 158, 0.4)' },
-  '#B18597': { from: '#B18597', to: '#CFA4B7', shadow: 'rgba(177, 133, 151, 0.4)' },
+// 🔥 重點：直接在預設狀態裡「塞入假資料」，確保絕對能渲染出雙面板！
+const defaultState: SystemState = {
+  projects: [
+    {
+      id: 'default-project-1',
+      name: '雲端增強計畫',
+      icon: '⚡',
+      color: 'from-blue-500 to-indigo-500',
+      items: [
+        { id: 'item-1', text: '歡迎來到你的專屬減壓小宇宙', completed: false, type: 'note', createdAt: new Date().toISOString() },
+        { id: 'item-2', text: '你不需要每天都很完美，只要前進就好。', completed: false, type: 'note', createdAt: new Date().toISOString() },
+        { id: 'item-3', text: '在 Supabase 資料庫同步成功前，這裡會顯示預設資料', completed: false, type: 'todo', createdAt: new Date().toISOString() }
+      ]
+    }
+  ],
+  activeProjectId: 'default-project-1',
+  activeItemType: 'note'
 };
 
-const MACARON_PALETTE = Object.keys(COLOR_MAPS);
-
 export default function Home() {
-  const [isInitialized, setIsInitialized] = useState(false);
-  const [currentView, setCurrentView] = useState<'welcome' | 'work' | 'personal' | 'mind'>('welcome');
-  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
-  const [newMemoText, setNewMemoText] = useState('');
-  const [newTodoText, setNewTodoText] = useState('');
-  
-  const [apiEnglishWord, setApiEnglishWord] = useState({ word: 'Loading...', detail: '連線資料庫撈取今日新聞英文...' });
-  const [apiThaiWord, setApiThaiWord] = useState({ word: 'Loading...', detail: '連線資料庫撈取今日商業泰語...' });
-  
-  const [supabaseMemos, setSupabaseMemos] = useState<MemoItem[]>([]);
-  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
-
+  // 3. 狀態初始化 (優先讀取本地快取，否則用包含假資料的預設值)
   const [systemState, setSystemState] = useState<SystemState>(() => {
-    const defaultState: SystemState = {
-      workTitle: '工作領域',
-      workDesc: '日常教學、行政事務與商業專案',
-      personalTitle: '私人生活',
-      personalDesc: '健康管理、日常興趣與生活調劑',
-      mindTitle: '異想知識庫',
-      mindDesc: '靈感閃現、奇思妙想與知識筆記',
-      projects: [
-        { id: 'w-1', name: '改課綱', desc: '修改目前的教學課綱與進度規劃', belongsTo: 'work', color: '#B5EAEA', notes: '這裡可以寫下課綱修改細節...', link: '', todos: [{ id: 't1', text: '確認新學期週數', completed: true }, { id: 't2', text: '送交教務處審核', completed: false }] },
-        { id: 'w-2', name: '工作項目二', desc: '點擊修改內容與詳細筆記', belongsTo: 'work', color: '#EDF6E8', notes: '', link: '', todos: [] },
-        { id: 'w-3', name: '工作項目三', desc: '點擊修改內容與詳細筆記', belongsTo: 'work', color: '#B39CD0', notes: '', link: '', todos: [] },
-        { id: 'p-1', name: '生活項目一', desc: '點擊修改內容與詳細筆記', belongsTo: 'personal', color: '#FFB4B4', notes: '', link: '', todos: [] },
-        { id: 'p-2', name: '生活項目二', desc: '點擊修改內容與詳細筆記', belongsTo: 'personal', color: '#FFCCB6', notes: '', link: '', todos: [] },
-        { id: 'p-3', name: '生活項目三', desc: '點擊修改內容與詳細筆記', belongsTo: 'personal', color: '#FFDEB4', notes: '', link: '', todos: [] }
-      ],
-      memos: [
-        { id: 'memo-1', text: '歡迎來到你的專屬減壓小宇宙', color: '#FFDEB4' },
-        { id: 'memo-2', text: '你不需要每天都很完美，只要前進就好。', color: '#B5EAEA' }
-      ]
-    };
-
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('life_hq_user_universe_data');
       if (saved) {
         try {
           const parsed = JSON.parse(saved);
-          if (parsed && Array.isArray(parsed.projects)) {
+          // 確保抓出來的資料是有項目的，如果舊資料是空的，一樣強制用假資料
+          if (parsed && Array.isArray(parsed.projects) && parsed.projects.length > 0) {
             return parsed;
           }
         } catch (e) {
-          console.error('LocalStorage 解析失敗:', e);
+          console.error("解析 LocalStorage 失敗", e);
         }
       }
     }
     return defaultState;
   });
 
+  const [newItemText, setNewItemText] = useState('');
+  const [newProjectName, setNewProjectName] = useState('');
+  const [showAddProject, setShowAddProject] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  // 4. 當狀態改變時，自動儲存到 LocalStorage
   useEffect(() => {
-    if (isInitialized) {
-      localStorage.setItem('life_hq_user_universe_data', JSON.stringify(systemState));
-    }
-  }, [systemState, isInitialized]);
+    localStorage.setItem('life_hq_user_universe_data', JSON.stringify(systemState));
+  }, [systemState]);
 
-  // 當切換空間時，自動預設選取該空間的第一個項目，避免右側空白
+  // 5. 從 Supabase 同步資料 (如果連得上的話)
   useEffect(() => {
-    if (currentView !== 'welcome') {
-      const spaceProjects = systemState.projects.filter(p => p.belongsTo === currentView);
-      if (spaceProjects.length > 0) {
-        setActiveProjectId(spaceProjects[0].id);
-      } else {
-        setActiveProjectId(null);
+    async function loadSupabaseData() {
+      if (!supabase) return;
+      setIsSyncing(true);
+      try {
+        const { data, error } = await supabase
+          .from('user_universe')
+          .select('content')
+          .single();
+        
+        if (data && data.content) {
+          const parsed = typeof data.content === 'string' ? JSON.parse(data.content) : data.content;
+          if (parsed && parsed.projects && parsed.projects.length > 0) {
+            setSystemState(parsed);
+          }
+        }
+      } catch (err) {
+        console.log("暫時無法連線至 Supabase，使用本地/預設資料儲存", err);
+      } finally {
+        setIsSyncing(false);
       }
     }
-  }, [currentView]);
-
-  const fetchDailyWordsFromCloud = async () => {
-    if (!supabase) return;
-    try {
-      const { data: engData, error: engErr } = await supabase.from('daily_words').select('word, detail').eq('type', 'english');
-      if (!engErr && engData && engData.length > 0) {
-        setApiEnglishWord(engData[Math.floor(Math.random() * engData.length)]);
-      } else {
-        setApiEnglishWord({ word: '無單字資料', detail: '請先在 Supabase 雲端資料庫新增英文單字。' });
-      }
-
-      const { data: thaiData, error: thaiErr } = await supabase.from('daily_words').select('word, detail').eq('type', 'thai');
-      if (!thaiErr && thaiData && thaiData.length > 0) {
-        setApiThaiWord(thaiData[Math.floor(Math.random() * thaiData.length)]);
-      } else {
-        setApiThaiWord({ word: '無單字資料', detail: '請先在 Supabase 雲端資料庫新增泰文單字。' });
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  useEffect(() => {
-    document.title = "Life HQ-我的小宇宙";
-    setIsInitialized(true);
-    fetchDailyWordsFromCloud();
-
-    if (!supabase) return;
-    let channel: any;
-
-    const initSupabase = async () => {
-      const { data, error } = await supabase.from('ideas').select('*').order('created_at', { ascending: false });
-      if (data) {
-        setSupabaseMemos(data.map((item: any) => ({ id: `sb-${item.id}`, text: `🛸 ${item.text}`, color: '#B5EAEA' })));
-      }
-      channel = supabase.channel('schema-db-changes').on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'ideas' }, (payload) => {
-        const newIdea = payload.new as { id: number; text: string };
-        setSupabaseMemos((prev) => [{ id: `sb-${newIdea.id}`, text: `🛸 ${newIdea.text}`, color: '#FFB4B4' }, ...prev]);
-      }).subscribe();
-    };
-    initSupabase();
-    return () => { if (supabase && channel) supabase.removeChannel(channel); };
+    loadSupabaseData();
   }, []);
 
-  const handleAddProject = (zone: 'work' | 'personal' | 'mind') => {
-    const newId = `project-${Date.now()}`;
-    const newProj: ProjectItem = {
-      id: newId,
-      name: '未命名新項目',
-      desc: '點擊右側編輯內容',
-      belongsTo: zone,
-      color: MACARON_PALETTE[Math.floor(Math.random() * MACARON_PALETTE.length)],
-      notes: '',
-      link: '',
-      todos: []
+  // 取得當前選中的項目
+  const activeProject = systemState.projects.find(p => p.id === systemState.activeProjectId) || systemState.projects[0];
+
+  // 處理切換項目
+  const handleSelectProject = (projectId: string) => {
+    setSystemState(prev => ({ ...prev, activeProjectId: projectId }));
+  };
+
+  // 處理切換 待辦/筆記 分頁
+  const handleTypeChange = (type: 'todo' | 'note') => {
+    setSystemState(prev => ({ ...prev, activeItemType: type }));
+  };
+
+  // 新增項目 (待辦或筆記)
+  const handleAddItem = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newItemText.trim() || !activeProject) return;
+
+    const newItem: Item = {
+      id: `item-${Date.now()}`,
+      text: newItemText.trim(),
+      completed: false,
+      type: systemState.activeItemType,
+      createdAt: new Date().toISOString()
     };
-    setSystemState(prev => ({ ...prev, projects: [...prev.projects, newProj] }));
-    setActiveProjectId(newId);
-  };
 
-  const handleConfirmDelete = () => {
-    if (!deleteConfirmId) return;
-    const remaining = systemState.projects.filter(p => p.id !== deleteConfirmId);
-    setSystemState(prev => ({ ...prev, projects: remaining }));
-    
-    if (activeProjectId === deleteConfirmId) {
-      const spaceProjects = remaining.filter(p => p.belongsTo === currentView);
-      setActiveProjectId(spaceProjects.length > 0 ? spaceProjects[0].id : null);
-    }
-    setDeleteConfirmId(null);
-  };
-
-  const handleProjectUpdate = (id: string, fields: Partial<ProjectItem>) => {
     setSystemState(prev => ({
       ...prev,
-      projects: prev.projects.map(p => p.id === id ? { ...p, ...fields } : p)
+      projects: prev.projects.map(p => 
+        p.id === activeProject.id 
+          ? { ...p, items: [newItem, ...p.items] }
+          : p
+      )
+    }));
+    setNewItemText('');
+  };
+
+  // 切換待辦事項勾選狀態
+  const handleToggleTodo = (itemId: string) => {
+    setSystemState(prev => ({
+      ...prev,
+      projects: prev.projects.map(p => ({
+        ...p,
+        items: p.items.map(item => 
+          item.id === itemId ? { ...item, completed: !item.completed } : item
+        )
+      }))
     }));
   };
 
-  const handleAddTodo = (projectId: string, e: React.FormEvent) => {
+  // 新增專案分類
+  const handleCreateProject = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTodoText.trim()) return;
+    if (!newProjectName.trim()) return;
+
+    const colors = [
+      'from-pink-500 to-rose-500',
+      'from-purple-500 to-indigo-500',
+      'from-blue-500 to-cyan-500',
+      'from-emerald-500 to-teal-500',
+      'from-amber-500 to-orange-500'
+    ];
+    const randomColor = colors[Math.floor(Math.random() * colors.length)];
+
+    const newProject: Project = {
+      id: `project-${Date.now()}`,
+      name: newProjectName.trim(),
+      icon: '📁',
+      color: randomColor,
+      items: []
+    };
 
     setSystemState(prev => ({
       ...prev,
-      projects: prev.projects.map(p => {
-        if (p.id !== projectId) return p;
-        const currentTodos = p.todos || [];
-        return {
-          ...p,
-          todos: [...currentTodos, { id: `todo-${Date.now()}`, text: newTodoText.trim(), completed: false }]
-        };
-      })
+      projects: [...prev.projects, newProject],
+      activeProjectId: newProject.id
     }));
-    setNewTodoText('');
+    setNewProjectName('');
+    setShowAddProject(false);
   };
 
-  const handleToggleTodo = (projectId: string, todoId: string) => {
-    setSystemState(prev => ({
-      ...prev,
-      projects: prev.projects.map(p => {
-        if (p.id !== projectId) return p;
-        return {
-          ...p,
-          todos: (p.todos || []).map(t => t.id === todoId ? { ...t, completed: !t.completed } : t)
-        };
-      })
-    }));
-  };
-
-  const handleDeleteTodo = (projectId: string, todoId: string) => {
-    setSystemState(prev => ({
-      ...prev,
-      projects: prev.projects.map(p => {
-        if (p.id !== projectId) return p;
-        return {
-          ...p,
-          todos: (p.todos || []).filter(t => t.id !== todoId)
-        };
-      })
-    }));
-  };
-
-  const handleAddMemo = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newMemoText.trim()) return;
-    setSystemState(prev => ({ ...prev, memos: [{ id: `memo-${Date.now()}`, text: newMemoText.trim(), color: MACARON_PALETTE[Math.floor(Math.random() * MACARON_PALETTE.length)] }, ...(prev.memos || [])] }));
-    setNewMemoText('');
-  };
-
-  const handleDeleteMemo = async (id: string) => {
-    if (id.startsWith('sb-')) {
-      const rawId = id.replace('sb-', '');
-      setSupabaseMemos(prev => prev.filter(m => m.id !== id));
-      if (supabase) await supabase.from('ideas').delete().eq('id', rawId);
-    } else {
-      setSystemState(prev => ({ ...prev, memos: (prev.memos || []).filter(m => m.id !== id) }));
-    }
-  };
-
-  const [draggedId, setDraggedId] = useState<string | null>(null);
-  const handleDropOnCard = (e: React.DragEvent, targetCardId: string) => {
-    e.preventDefault();
-    if (!draggedId || draggedId === targetCardId) return;
-    setSystemState(prev => {
-      const dragIndex = prev.projects.findIndex(p => p.id === draggedId);
-      const targetIndex = prev.projects.findIndex(p => p.id === targetCardId);
-      if (dragIndex === -1 || targetIndex === -1 || prev.projects[dragIndex].belongsTo !== prev.projects[targetIndex].belongsTo) return prev;
-      const newProjects = [...prev.projects];
-      const [draggedItem] = newProjects.splice(dragIndex, 1);
-      newProjects.splice(targetIndex, 0, draggedItem);
-      return { ...prev, projects: newProjects };
-    });
-    setDraggedId(null);
-  };
-
-  if (!isInitialized) return <div className="h-screen w-screen bg-[#FFF0F2] flex items-center justify-center text-slate-400 font-mono text-xs tracking-widest">MY_UNIVERSE INITIALIZING...</div>;
-
-  const combinedMemos = [...supabaseMemos, ...(systemState.memos || [])];
-  const displayedProjects = systemState.projects.filter(p => p.belongsTo === currentView);
-  const workCount = systemState.projects.filter(p => p.belongsTo === 'work').length;
-  const personalCount = systemState.projects.filter(p => p.belongsTo === 'personal').length;
-  const mindCount = systemState.projects.filter(p => p.belongsTo === 'mind').length;
-  
-  // 當前右側面板選中的項目
-  const currentProject = systemState.projects.find(p => p.id === activeProjectId) || displayedProjects[0];
-
-  const getTodoSummary = (proj: ProjectItem) => {
-    if (!proj.todos || proj.todos.length === 0) return null;
-    const done = proj.todos.filter(t => t.completed).length;
-    return `${done}/${proj.todos.length}`;
-  };
+  // 過濾當前分頁要顯示的內容
+  const filteredItems = activeProject 
+    ? activeProject.items.filter(item => item.type === systemState.activeItemType)
+    : [];
 
   return (
-    <div className={`min-h-screen w-screen p-8 font-sans antialiased selection:bg-pink-100 relative overflow-x-hidden transition-colors duration-500 ${currentView === 'work' ? 'bg-[#EDF4F6]' : currentView === 'personal' ? 'bg-[#FAF0F2]' : currentView === 'mind' ? 'bg-[#F4EDFA]' : 'bg-[#FAF0F2]'}`}>
-      
-      <div className="mx-auto max-w-[95%] relative z-10">
+    <main className="min-h-screen bg-slate-50 text-slate-800 p-4 md:p-8">
+      <div className="max-w-6xl mx-auto space-y-6">
         
-        <div className="text-[11px] text-pink-400 font-mono mb-6 tracking-widest flex items-center gap-2 select-none">
-          <span className="cursor-pointer hover:text-pink-600 transition-colors" onClick={() => setCurrentView('welcome')}>MY_SPACE</span>
-          {currentView !== 'welcome' && <><span className="text-slate-300">/</span><span className="text-pink-500 font-medium uppercase">{currentView}_SPACE</span></>}
+        {/* 頂部標題與狀態列 */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+          <div>
+            <h1 className="text-2xl font-bold bg-gradient-to-r from-indigo-600 to-violet-600 bg-clip-text text-transparent">
+              今日雲端增強計畫
+            </h1>
+            <p className="text-sm text-slate-500 mt-1">時光便籤壁 · 您的專屬減壓小宇宙</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${supabase ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+              <span className={`h-2 w-2 rounded-full ${supabase ? 'bg-emerald-500' : 'bg-amber-400 animate-pulse'}`}></span>
+              {supabase ? (isSyncing ? '雲端同步中...' : 'LINE 即時同步中') : '本地快取模式'}
+            </span>
+          </div>
         </div>
 
-        {/* 1. 主首頁佈局 */}
-        {currentView === 'welcome' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 py-6 max-w-6xl mx-auto">
-            <div className="lg:col-span-7 space-y-6">
-              <h1 className="text-4xl font-light tracking-tight text-slate-800">屬於我的小宇宙</h1>
-              <div className="pt-6 space-y-5">
-                <div onClick={() => setCurrentView('work')} className="group cursor-pointer bg-gradient-to-br from-[#E8F4F8]/85 to-[#Cbe3eb]/70 backdrop-blur-md rounded-2xl p-6 hover:shadow-xl hover:shadow-blue-300/30 transition-all border border-white/40">
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <h3 className="text-base font-semibold text-slate-800 group-hover:text-blue-700 transition-colors">{systemState.workTitle}</h3>
-                      <p className="text-slate-500 text-xs mt-1 font-light">{systemState.workDesc}</p>
-                    </div>
-                    <div className="text-[11px] font-mono bg-white/80 px-3 py-1.5 rounded-xl text-blue-600 font-medium">{workCount} 項目</div>
-                  </div>
-                </div>
-                <div onClick={() => setCurrentView('personal')} className="group cursor-pointer bg-gradient-to-br from-[#FFF0F2]/90 to-[#Fcdde2]/75 backdrop-blur-md rounded-2xl p-6 hover:shadow-xl hover:shadow-pink-300/30 transition-all border border-white/40">
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <h3 className="text-base font-semibold text-slate-800 group-hover:text-pink-700 transition-colors">{systemState.personalTitle}</h3>
-                      <p className="text-slate-500 text-xs mt-1 font-light">{systemState.personalDesc}</p>
-                    </div>
-                    <div className="text-[11px] font-mono bg-white/80 px-3 py-1.5 rounded-xl text-pink-600 font-medium">{personalCount} 項目</div>
-                  </div>
-                </div>
-                <div onClick={() => setCurrentView('mind')} className="group cursor-pointer bg-gradient-to-br from-[#F3EAF8]/85 to-[#E1cbed]/70 backdrop-blur-md rounded-2xl p-6 hover:shadow-xl hover:shadow-purple-300/30 transition-all border border-white/40">
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <h3 className="text-base font-semibold text-slate-800 group-hover:text-purple-700 transition-colors">{systemState.mindTitle}</h3>
-                      <p className="text-slate-500 text-xs mt-1 font-light">{systemState.mindDesc}</p>
-                    </div>
-                    <div className="text-[11px] font-mono bg-white/80 px-3 py-1.5 rounded-xl text-purple-600 font-medium">{mindCount} 項目</div>
-                  </div>
-                </div>
-              </div>
+        {/* 💡 提示操作列 */}
+        <div className="bg-indigo-50/60 border border-indigo-100/80 rounded-xl p-4 text-sm text-indigo-700 flex items-center gap-2">
+          <span>⚡ 點擊左側方塊，右側面板會即時切換待辦與筆記</span>
+        </div>
+
+        {/* 核心雙面板排版佈局 */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          
+          {/* 左側面板：專案項目方塊 (佔 5 格) */}
+          <div className="lg:col-span-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-slate-700">分類項目</h2>
+              <button 
+                onClick={() => setShowAddProject(!showAddProject)}
+                className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-2.5 py-1.5 rounded-lg font-medium transition"
+              >
+                {showAddProject ? '取消新增' : '+ 新增分類'}
+              </button>
             </div>
 
-            <div className="lg:col-span-5 bg-white/70 backdrop-blur-md border border-white/50 rounded-2xl p-6 shadow-sm flex flex-col justify-between min-h-[480px]">
-              <div className="space-y-6">
-                <div>
-                  <div className="flex justify-between items-center mb-3">
-                    <h2 className="text-xs font-semibold text-slate-400 tracking-wider uppercase">今日雲端增強計畫</h2>
-                    <button type="button" onClick={fetchDailyWordsFromCloud} className="text-[10px] text-pink-500 font-mono">🔄 隨機換字</button>
-                  </div>
-                  <div className="space-y-2.5">
-                    <div className="p-3.5 rounded-xl bg-white/60 border border-white text-xs"><div className="font-bold text-slate-700 text-sm">{apiEnglishWord.word}</div><div className="text-slate-400 text-[11px] mt-0.5">{apiEnglishWord.detail}</div></div>
-                    <div className="p-3.5 rounded-xl bg-white/60 border border-white text-xs"><div className="font-bold text-slate-700 text-sm">{apiThaiWord.word}</div><div className="text-slate-400 text-[11px] mt-0.5">{apiThaiWord.detail}</div></div>
-                  </div>
-                </div>
-                <div>
-                  <h2 className="text-xs font-semibold text-slate-400 tracking-wider uppercase mb-2">時光便簽壁</h2>
-                  <div className="space-y-2.5 max-h-[180px] overflow-y-auto pr-1">
-                    {combinedMemos.map(memo => (
-                      <div key={memo.id} className="p-3.5 rounded-xl bg-white/90 text-xs text-slate-700 border border-slate-100 relative group flex justify-between items-start shadow-sm">
-                        <span className="flex-1 pr-4 font-light">{memo.text}</span>
-                        <button onClick={() => handleDeleteMemo(memo.id)} className="text-[10px] text-slate-300 hover:text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity">刪除</button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-              <form onSubmit={handleAddMemo} className="mt-4 pt-4 border-t border-slate-100 flex gap-2">
-                <input type="text" value={newMemoText} onChange={e => setNewMemoText(e.target.value)} placeholder="輸入便簽內容..." className="bg-slate-50 border border-slate-100 text-xs rounded-xl px-3.5 py-2.5 flex-1 focus:outline-none focus:bg-white transition-all" />
-                <button type="submit" className="bg-slate-800 hover:bg-slate-900 text-white text-xs px-4 rounded-xl shadow-sm">新增</button>
+            {/* 新增分類表單 */}
+            {showAddProject && (
+              <form onSubmit={handleCreateProject} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-3">
+                <input 
+                  type="text"
+                  placeholder="輸入新分類名稱..."
+                  value={newProjectName}
+                  onChange={(e) => setNewProjectName(e.target.value)}
+                  className="w-full text-sm px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  maxLength={20}
+                  required
+                />
+                <button type="submit" className="w-full text-xs bg-slate-800 hover:bg-slate-900 text-white py-2 rounded-lg font-medium transition">
+                  確認建立
+                </button>
               </form>
-            </div>
-          </div>
-        )}
+            )}
 
-        {/* 2. 獨立空間頁面：完美仿照首頁，切分成「左右常駐雙面版」 */}
-        {currentView !== 'welcome' && (
-          <div className="space-y-6">
-            
-            {/* 頂部導覽列 */}
-            <div className="flex justify-between items-center border-b border-black/5 pb-4">
-              <button onClick={() => setCurrentView('welcome')} className="px-4 py-2 rounded-xl bg-white/80 border border-white/60 text-slate-600 text-xs shadow-sm font-medium">返回首頁</button>
-              <div className="text-[11px] text-slate-400 font-mono">⚡ 點擊左側方塊，右側面板會即時切換待辦與筆記</div>
-            </div>
+            {/* 分類方塊列表 - 強制 grid-cols-1 垂直單列堆疊 */}
+            <div className="grid grid-cols-1 gap-4">
+              {systemState.projects.map((project) => {
+                const isSelected = activeProject?.id === project.id;
+                const todoCount = project.items.filter(i => i.type === 'todo' && !i.completed).length;
+                const noteCount = project.items.filter(i => i.type === 'note').length;
 
-            {/* 左右分割大區塊 */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-              
-              {/* 【左側面板 - 7格】：馬卡龍項目方塊列表 */}
-              <div className="lg:col-span-7 space-y-6">
-                
-                <div className="flex justify-between items-center bg-white/65 backdrop-blur-md p-5 rounded-2xl border border-white/60 shadow-xs">
-                  <div className="space-y-0.5">
-                    <h2 className="text-lg font-bold text-slate-800 tracking-tight">
-                      {currentView === 'work' ? systemState.workTitle : currentView === 'personal' ? systemState.personalTitle : systemState.mindTitle}
-                    </h2>
-                    <p className="text-slate-400 text-xs font-light">{currentView === 'work' ? systemState.workDesc : currentView === 'personal' ? systemState.personalDesc : systemState.mindDesc}</p>
-                  </div>
-                  <button onClick={() => handleAddProject(currentView)} className="bg-slate-800 hover:bg-slate-900 text-white text-xs px-4 py-2.5 rounded-xl font-medium shadow-sm transition-all">新增項目</button>
-                </div>
-
-                {/* 方塊網格：強迫改成 grid-cols-1 讓它們像首頁一樣垂直整齊排成一列 */}
-                <div className="grid grid-cols-1 gap-4">
-                  {displayedProjects.map(project => {
-                    const colorSetup = COLOR_MAPS[project.color] || { from: project.color, to: project.color, shadow: 'rgba(0,0,0,0.05)' };
-                    const todoSummary = getTodoSummary(project);
-                    const isSelected = currentProject?.id === project.id;
-                    
-                    return (
-                      <div 
-                        key={project.id}
-                        draggable={true}
-                        onDragStart={() => setDraggedId(project.id)}
-                        onDragOver={e => e.preventDefault()}
-                        onDrop={(e) => handleDropOnCard(e, project.id)}
-                        onClick={() => setActiveProjectId(project.id)}
-                        className={`cursor-pointer rounded-2xl p-6 flex flex-col justify-between min-h-[100px] transition-all duration-300 group relative border backdrop-blur-md select-none ${isSelected ? 'ring-2 ring-slate-800 ring-offset-2 scale-[1.01]' : 'hover:-translate-y-0.5'}`}
-                        style={{ 
-                          background: `linear-gradient(135deg, ${colorSetup.from}ee, ${colorSetup.to}cc)`,
-                          borderColor: isSelected ? '#1e293b' : 'rgba(255,255,255,0.4)',
-                          boxShadow: `0 8px 20px -5px ${colorSetup.shadow}`
-                        }}
-                      >
-                        <button onClick={(e) => { e.stopPropagation(); setDeleteConfirmId(project.id); }} className="absolute top-4 right-4 text-slate-500 hover:text-red-600 text-[11px] opacity-0 group-hover:opacity-100 transition-opacity">刪除</button>
-                        
-                        <div className="flex justify-between items-center w-full"> 
-                          <div className="space-y-1">
-                            <h3 className="text-base font-bold text-slate-800 leading-snug">{project.name}</h3>
-                            <p className="text-xs text-slate-600/90 font-light whitespace-pre-line leading-relaxed">{project.desc || '點擊右側編輯此項目描述...'}</p>
+                return (
+                  <button
+                    key={project.id}
+                    onClick={() => handleSelectProject(project.id)}
+                    className={`w-full text-left p-5 rounded-2xl border transition-all duration-200 bg-white shadow-sm ${
+                      isSelected 
+                        ? 'border-indigo-600 ring-2 ring-indigo-600/10' 
+                        : 'border-slate-100 hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${project.color} text-white flex items-center justify-center text-lg shadow-sm`}>
+                          {project.icon}
+                        </div>
+                        <div>
+                          <h3 className="font-semibold text-slate-800">{project.name}</h3>
+                          <div className="flex items-center gap-2 mt-1 text-xs text-slate-400">
+                            <span>📋 {todoCount} 待辦</span>
+                            <span>·</span>
+                            <span>✍️ {noteCount} 筆記</span>
                           </div>
-                          {todoSummary && (
-                            <span className="text-[10px] font-mono bg-white/80 text-slate-700 px-2.5 py-1 rounded-xl font-bold shadow-2xs shrink-0">
-                              📋 {todoSummary}
-                            </span>
-                          )}
                         </div>
                       </div>
-                    );
-                  })}
-                  {displayedProjects.length === 0 && (
-                    <div className="text-center py-12 text-slate-400 font-light text-xs">目前還沒有項目，點擊上方新增一個吧！</div>
+                      {isSelected && (
+                        <span className="text-xs bg-indigo-50 text-indigo-600 font-semibold px-2.5 py-1 rounded-full border border-indigo-100">
+                          已選取
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 右側面板：詳細內容與新增區 (佔 7 格) */}
+          <div className="lg:col-span-7 bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+            {activeProject ? (
+              <div>
+                {/* 右側面板頭部：分頁切換 */}
+                <div className="bg-slate-50/70 p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-slate-700 text-base">{activeProject.name}</span>
+                  </div>
+                  
+                  {/* 待辦 / 筆記 切換 Tab */}
+                  <div className="flex bg-slate-200/60 p-1 rounded-xl w-fit">
+                    <button
+                      onClick={() => handleTypeChange('note')}
+                      className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition ${
+                        systemState.activeItemType === 'note'
+                          ? 'bg-white text-slate-800 shadow-sm'
+                          : 'text-slate-500 hover:text-slate-800'
+                      }`}
+                    >
+                      ✍️ 隨手筆記
+                    </button>
+                    <button
+                      onClick={() => handleTypeChange('todo')}
+                      className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition ${
+                        systemState.activeItemType === 'todo'
+                          ? 'bg-white text-slate-800 shadow-sm'
+                          : 'text-slate-500 hover:text-slate-800'
+                      }`}
+                    >
+                      📋 待辦清單
+                    </button>
+                  </div>
+                </div>
+
+                {/* 內容輸入區 */}
+                <div className="p-6 border-b border-slate-100">
+                  <form onSubmit={handleAddItem} className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder={systemState.activeItemType === 'todo' ? "新增待辦事項..." : "寫點生活筆記、減壓小語..."}
+                      value={newItemText}
+                      onChange={(e) => setNewItemText(e.target.value)}
+                      className="flex-1 text-sm px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50/50"
+                      required
+                    />
+                    <button
+                      type="submit"
+                      className="px-5 py-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-sm font-medium transition shadow-sm shrink-0"
+                    >
+                      新增
+                    </button>
+                  </form>
+                </div>
+
+                {/* 列表渲染區 */}
+                <div className="p-6 min-h-[300px] max-h-[500px] overflow-y-auto space-y-3">
+                  {filteredItems.length === 0 ? (
+                    <div className="text-center py-12 text-slate-400 text-sm">
+                      <div className="text-3xl mb-2">🍃</div>
+                      目前還沒有任何{systemState.activeItemType === 'todo' ? '待辦事項' : '筆記'}喔，立刻在上方新增一個吧！
+                    </div>
+                  ) : (
+                    filteredItems.map((item) => (
+                      <div 
+                        key={item.id} 
+                        className={`p-4 rounded-xl border text-sm transition-all flex items-start gap-3 ${
+                          item.completed 
+                            ? 'bg-slate-50/80 border-slate-100 text-slate-400 line-through' 
+                            : 'bg-white border-slate-100 hover:border-slate-200 shadow-sm'
+                        }`}
+                      >
+                        {systemState.activeItemType === 'todo' && (
+                          <input
+                            type="checkbox"
+                            checked={item.completed}
+                            onChange={() => handleToggleTodo(item.id)}
+                            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                          />
+                        )}
+                        <span className="flex-1 break-words">{item.text}</span>
+                      </div>
+                    ))
                   )}
                 </div>
+
               </div>
-
-              {/* 【右側面板 - 5格】：常駐專屬待辦清單 (To-Do List) 與詳細編輯面版 */}
-              <div className="lg:col-span-5 bg-white/80 backdrop-blur-md border border-white/60 rounded-2xl p-6 shadow-sm min-h-[500px] flex flex-col justify-between sticky top-8">
-                {currentProject ? (
-                  <div className="space-y-5 flex-1 flex flex-col justify-between h-full">
-                    
-                    <div className="space-y-4">
-                      {/* 標題欄位編輯 */}
-                      <div>
-                        <label className="text-[10px] text-slate-400 font-mono font-bold tracking-wider uppercase block mb-1">項目名稱</label>
-                        <input type="text" value={currentProject.name} onChange={e => handleProjectUpdate(currentProject.id, { name: e.target.value })} className="bg-slate-50/60 text-slate-800 font-bold text-base rounded-xl px-3 py-2 w-full border border-slate-100 focus:bg-white transition-colors focus:outline-none" />
-                      </div>
-
-                      {/* 簡短摘要編輯 */}
-                      <div>
-                        <label className="text-[10px] text-slate-400 font-mono font-bold tracking-wider uppercase block mb-1">簡短摘要描述</label>
-                        <input type="text" value={currentProject.desc} onChange={e => handleProjectUpdate(currentProject.id, { desc: e.target.value })} className="bg-slate-50/60 text-slate-600 text-xs rounded-xl px-3 py-2 w-full border border-slate-100 focus:bg-white transition-colors focus:outline-none" />
-                      </div>
-
-                      <hr className="border-slate-100 my-1" />
-
-                      {/* 核心待辦清單區塊 */}
-                      <div>
-                        <div className="flex justify-between items-center mb-2">
-                          <label className="text-[11px] text-slate-400 font-mono font-bold tracking-wider">📋 專屬待辦步驟</label>
-                          <span className="text-[10px] bg-slate-100 px-2 py-0.5 text-slate-500 rounded-md font-mono">{getTodoSummary(currentProject) || '0/0'}</span>
-                        </div>
-
-                        {/* 待辦事項列表 */}
-                        <div className="space-y-1.5 max-h-[180px] overflow-y-auto pr-1">
-                          {(currentProject.todos || []).length === 0 ? (
-                            <div className="text-center text-slate-300 text-xs font-light py-6 border border-dashed border-slate-100 rounded-xl">在下方輸入步驟來建立待辦清單</div>
-                          ) : (
-                            (currentProject.todos || []).map(todo => (
-                              <div key={todo.id} className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50/50 border border-slate-100/70 text-xs group transition-all hover:bg-white">
-                                <label className="flex items-center gap-2.5 cursor-pointer flex-1 min-w-0">
-                                  <input 
-                                    type="checkbox" 
-                                    checked={todo.completed} 
-                                    onChange={() => handleToggleTodo(currentProject.id, todo.id)}
-                                    className="rounded text-pink-500 focus:ring-pink-200 w-3.5 h-3.5 accent-pink-500 cursor-pointer"
-                                  />
-                                  <span className={`truncate ${todo.completed ? 'line-through text-slate-300' : 'text-slate-700 font-light'}`}>
-                                    {todo.text}
-                                  </span>
-                                </label>
-                                <button 
-                                  onClick={() => handleDeleteTodo(currentProject.id, todo.id)} 
-                                  className="text-[10px] text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity ml-2 px-1"
-                                >
-                                  ✕
-                                </button>
-                              </div>
-                            ))
-                          )}
-                        </div>
-
-                        {/* 新增待辦輸入欄 */}
-                        <form onSubmit={(e) => handleAddTodo(currentProject.id, e)} className="flex gap-2 mt-2">
-                          <input 
-                            type="text" 
-                            value={newTodoText} 
-                            onChange={e => setNewTodoText(e.target.value)} 
-                            placeholder="新增一個待辦事項..." 
-                            className="bg-slate-50 border border-slate-100 text-xs rounded-xl px-3 py-2 flex-1 focus:outline-none focus:bg-white text-slate-700 transition-all"
-                          />
-                          <button type="submit" className="bg-slate-800 hover:bg-slate-900 text-white text-xs px-3.5 rounded-xl font-medium shadow-2xs">添加</button>
-                        </form>
-                      </div>
-
-                      {/* 長篇詳細筆記 */}
-                      <div className="flex flex-col space-y-1">
-                        <label className="text-[10px] text-slate-400 font-mono font-bold tracking-wider uppercase">詳細研討筆記備忘</label>
-                        <textarea value={currentProject.notes || ''} onChange={e => handleProjectUpdate(currentProject.id, { notes: e.target.value })} className="w-full bg-slate-50 text-slate-700 text-xs rounded-xl p-3 focus:outline-none border border-slate-100 focus:bg-white resize-none leading-relaxed h-[100px]" placeholder="在這裡自由紀錄更長的心得、細節或專案大綱..." />
-                      </div>
-                    </div>
-
-                    {/* 底部輔助工具 */}
-                    <div className="pt-3 border-t border-slate-100 flex justify-between items-center gap-2">
-                      <div className="flex items-center gap-1.5 flex-1">
-                        <span className="text-[10px] text-slate-400 whitespace-nowrap">參考連結</span>
-                        <input type="text" value={currentProject.link || ''} onChange={e => handleProjectUpdate(currentProject.id, { link: e.target.value })} className="bg-slate-50 text-slate-600 text-[11px] rounded-lg px-2 py-1 flex-1 border border-slate-100 focus:outline-none focus:bg-white" placeholder="https://..." />
-                        {currentProject.link && <a href={currentProject.link} target="_blank" rel="noopener noreferrer" className="bg-slate-100 text-slate-600 text-[10px] px-2 py-1 rounded-lg hover:bg-slate-200">開啟</a>}
-                      </div>
-
-                      <select value={currentProject.belongsTo} onChange={e => {
-                        const targetZone = e.target.value as 'work' | 'personal' | 'mind';
-                        handleProjectUpdate(currentProject.id, { belongsTo: targetZone });
-                        setCurrentView(targetZone);
-                      }} className="bg-slate-50 text-slate-400 hover:text-slate-600 text-[10px] px-2 py-1 rounded-lg border border-slate-100 focus:outline-none font-medium">
-                        <option value="work">移至 工作區</option>
-                        <option value="personal">移至 生活區</option>
-                        <option value="mind">移至 知識庫</option>
-                      </select>
-                    </div>
-
-                  </div>
-                ) : (
-                  <div className="h-full flex items-center justify-center text-slate-300 text-xs font-light py-20">請先建立或選取項目</div>
-                )}
+            ) : (
+              <div className="text-center py-24 text-slate-400 text-sm">
+                請先建立或選取左側的一個項目分類
               </div>
-
-            </div>
+            )}
           </div>
-        )}
 
-        {/* 刪除確認防呆視窗 */}
-        {deleteConfirmId && (
-          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-2xs flex items-center justify-center p-4 z-50">
-            <div className="bg-white rounded-2xl max-w-sm w-full p-6 text-center shadow-2xl border border-slate-100">
-              <span className="text-4xl mb-3 block">🌸</span>
-              <h3 className="text-md font-bold text-slate-800 mb-2">確定要刪除這個馬卡龍方塊嗎？</h3>
-              <p className="text-slate-400 text-xs mb-6">此動作將連同右側的所有待辦步驟一併永久移除！</p>
-              <div className="flex gap-3 justify-center">
-                <button onClick={() => setDeleteConfirmId(null)} className="px-4 py-2 rounded-xl bg-slate-100 text-slate-600 text-xs font-medium">取消</button>
-                <button onClick={handleConfirmDelete} className="px-4 py-2 rounded-xl bg-pink-500 hover:bg-pink-600 text-white text-xs font-medium shadow-sm">確認刪除</button>
-              </div>
-            </div>
-          </div>
-        )}
+        </div>
 
       </div>
-    </div>
+    </main>
   );
 }
