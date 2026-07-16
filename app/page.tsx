@@ -25,7 +25,7 @@ interface ProjectItem {
   color: string;
   notes: string;
   link: string;
-  todos?: TodoItem[]; // 💡 新增：支援每個項目獨立的待辦清單
+  todos?: TodoItem[];
 }
 
 interface MemoItem {
@@ -71,7 +71,7 @@ export default function Home() {
   const [currentView, setCurrentView] = useState<'welcome' | 'work' | 'personal' | 'mind'>('welcome');
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [newMemoText, setNewMemoText] = useState('');
-  const [newTodoText, setNewTodoText] = useState(''); // 💡 待辦輸入框控制
+  const [newTodoText, setNewTodoText] = useState('');
   
   const [apiEnglishWord, setApiEnglishWord] = useState({ word: 'Loading...', detail: '連線資料庫撈取今日新聞英文...' });
   const [apiThaiWord, setApiThaiWord] = useState({ word: 'Loading...', detail: '連線資料庫撈取今日商業泰語...' });
@@ -88,7 +88,7 @@ export default function Home() {
       mindTitle: '異想知識庫',
       mindDesc: '靈感閃現、奇思妙想與知識筆記',
       projects: [
-        { id: 'w-1', name: '工作項目一', desc: '點擊修改內容與詳細筆記', belongsTo: 'work', color: '#B5EAEA', notes: '', link: '', todos: [] },
+        { id: 'w-1', name: '改課綱', desc: '修改目前的教學課綱與進度規劃', belongsTo: 'work', color: '#B5EAEA', notes: '這裡可以寫下課綱修改細節...', link: '', todos: [{ id: 't1', text: '確認新學期週數', completed: true }, { id: 't2', text: '送交教務處審核', completed: false }] },
         { id: 'w-2', name: '工作項目二', desc: '點擊修改內容與詳細筆記', belongsTo: 'work', color: '#EDF6E8', notes: '', link: '', todos: [] },
         { id: 'w-3', name: '工作項目三', desc: '點擊修改內容與詳細筆記', belongsTo: 'work', color: '#B39CD0', notes: '', link: '', todos: [] },
         { id: 'p-1', name: '生活項目一', desc: '點擊修改內容與詳細筆記', belongsTo: 'personal', color: '#FFB4B4', notes: '', link: '', todos: [] },
@@ -122,6 +122,18 @@ export default function Home() {
       localStorage.setItem('life_hq_user_universe_data', JSON.stringify(systemState));
     }
   }, [systemState, isInitialized]);
+
+  // 當切換空間時，自動預設選取該空間的第一個項目，避免右側空白
+  useEffect(() => {
+    if (currentView !== 'welcome') {
+      const spaceProjects = systemState.projects.filter(p => p.belongsTo === currentView);
+      if (spaceProjects.length > 0) {
+        setActiveProjectId(spaceProjects[0].id);
+      } else {
+        setActiveProjectId(null);
+      }
+    }
+  }, [currentView]);
 
   const fetchDailyWordsFromCloud = async () => {
     if (!supabase) return;
@@ -171,12 +183,12 @@ export default function Home() {
     const newProj: ProjectItem = {
       id: newId,
       name: '未命名新項目',
-      desc: '點擊修改內容',
+      desc: '點擊右側編輯內容',
       belongsTo: zone,
       color: MACARON_PALETTE[Math.floor(Math.random() * MACARON_PALETTE.length)],
       notes: '',
       link: '',
-      todos: [] // 初始化空待辦
+      todos: []
     };
     setSystemState(prev => ({ ...prev, projects: [...prev.projects, newProj] }));
     setActiveProjectId(newId);
@@ -184,8 +196,13 @@ export default function Home() {
 
   const handleConfirmDelete = () => {
     if (!deleteConfirmId) return;
-    setSystemState(prev => ({ ...prev, projects: prev.projects.filter(p => p.id !== deleteConfirmId) }));
-    if (activeProjectId === deleteConfirmId) setActiveProjectId(null);
+    const remaining = systemState.projects.filter(p => p.id !== deleteConfirmId);
+    setSystemState(prev => ({ ...prev, projects: remaining }));
+    
+    if (activeProjectId === deleteConfirmId) {
+      const spaceProjects = remaining.filter(p => p.belongsTo === currentView);
+      setActiveProjectId(spaceProjects.length > 0 ? spaceProjects[0].id : null);
+    }
     setDeleteConfirmId(null);
   };
 
@@ -196,7 +213,6 @@ export default function Home() {
     }));
   };
 
-  // 💡 新增：處理專案內待辦事項的函式群
   const handleAddTodo = (projectId: string, e: React.FormEvent) => {
     e.preventDefault();
     if (!newTodoText.trim()) return;
@@ -281,9 +297,10 @@ export default function Home() {
   const workCount = systemState.projects.filter(p => p.belongsTo === 'work').length;
   const personalCount = systemState.projects.filter(p => p.belongsTo === 'personal').length;
   const mindCount = systemState.projects.filter(p => p.belongsTo === 'mind').length;
-  const currentProject = systemState.projects.find(p => p.id === activeProjectId);
+  
+  // 當前右側面板選中的項目
+  const currentProject = systemState.projects.find(p => p.id === activeProjectId) || displayedProjects[0];
 
-  // 計算目前專案的待辦進度摘要
   const getTodoSummary = (proj: ProjectItem) => {
     if (!proj.todos || proj.todos.length === 0) return null;
     const done = proj.todos.filter(t => t.completed).length;
@@ -293,16 +310,16 @@ export default function Home() {
   return (
     <div className={`min-h-screen w-screen p-8 font-sans antialiased selection:bg-pink-100 relative overflow-x-hidden transition-colors duration-500 ${currentView === 'work' ? 'bg-[#EDF4F6]' : currentView === 'personal' ? 'bg-[#FAF0F2]' : currentView === 'mind' ? 'bg-[#F4EDFA]' : 'bg-[#FAF0F2]'}`}>
       
-      <div className={`mx-auto transition-all duration-300 relative z-10 ${currentView === 'welcome' ? 'max-w-6xl' : 'max-w-[95%]'}`}>
+      <div className="mx-auto max-w-[95%] relative z-10">
         
-        <div className="text-[11px] text-pink-400 font-mono mb-8 tracking-widest flex items-center gap-2 select-none">
+        <div className="text-[11px] text-pink-400 font-mono mb-6 tracking-widest flex items-center gap-2 select-none">
           <span className="cursor-pointer hover:text-pink-600 transition-colors" onClick={() => setCurrentView('welcome')}>MY_SPACE</span>
           {currentView !== 'welcome' && <><span className="text-slate-300">/</span><span className="text-pink-500 font-medium uppercase">{currentView}_SPACE</span></>}
         </div>
 
-        {/* 主首頁 */}
+        {/* 1. 主首頁佈局 */}
         {currentView === 'welcome' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 py-6">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 py-6 max-w-6xl mx-auto">
             <div className="lg:col-span-7 space-y-6">
               <h1 className="text-4xl font-light tracking-tight text-slate-800">屬於我的小宇宙</h1>
               <div className="pt-6 space-y-5">
@@ -368,162 +385,188 @@ export default function Home() {
           </div>
         )}
 
-        {/* 分區獨立頁面 */}
+        {/* 2. 獨立空間頁面：完美仿照首頁，切分成「左右常駐雙面版」 */}
         {currentView !== 'welcome' && (
           <div className="space-y-6">
-            <div className="flex justify-between items-center border-b border-black/5 pb-5">
+            
+            {/* 頂部導覽列 */}
+            <div className="flex justify-between items-center border-b border-black/5 pb-4">
               <button onClick={() => setCurrentView('welcome')} className="px-4 py-2 rounded-xl bg-white/80 border border-white/60 text-slate-600 text-xs shadow-sm font-medium">返回首頁</button>
-              <div className="text-[10px] text-slate-400 font-mono">💡 提示：點擊方塊可開啟專屬「待辦清單」與筆記</div>
+              <div className="text-[11px] text-slate-400 font-mono">⚡ 點擊左側方塊，右側面板會即時切換待辦與筆記</div>
             </div>
 
-            <div className="flex justify-between items-end bg-white/50 backdrop-blur-md p-5 rounded-xl border border-white/60 shadow-sm">
-              <div className="space-y-1">
-                <h2 className="text-xl font-medium text-slate-800 tracking-tight">
-                  {currentView === 'work' ? systemState.workTitle : currentView === 'personal' ? systemState.personalTitle : systemState.mindTitle}
-                </h2>
-                <p className="text-slate-400 text-xs font-light">{currentView === 'work' ? systemState.workDesc : currentView === 'personal' ? systemState.personalDesc : systemState.mindDesc}</p>
-              </div>
-              <button onClick={() => handleAddProject(currentView)} className="bg-white hover:bg-slate-50 text-slate-700 text-xs px-5 py-2.5 rounded-xl border border-slate-200 font-medium shadow-sm">新增項目</button>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6 pt-2">
-              {displayedProjects.map(project => {
-                const colorSetup = COLOR_MAPS[project.color] || { from: project.color, to: project.color, shadow: 'rgba(0,0,0,0.05)' };
-                const todoSummary = getTodoSummary(project);
-                
-                return (
-                  <div 
-                    key={project.id}
-                    draggable={true}
-                    onDragStart={() => setDraggedId(project.id)}
-                    onDragOver={e => e.preventDefault()}
-                    onDrop={(e) => handleDropOnCard(e, project.id)}
-                    onClick={() => setActiveProjectId(project.id)}
-                    className="cursor-grab active:cursor-grabbing rounded-2xl p-5 flex flex-col justify-between min-h-[160px] transition-all hover:-translate-y-1 duration-300 group relative border border-white/30 backdrop-blur-md select-none"
-                    style={{ 
-                      background: `linear-gradient(135deg, ${colorSetup.from}ee, ${colorSetup.to}cc)`,
-                      boxShadow: `0 10px 25px -5px ${colorSetup.shadow}`
-                    }}
-                  >
-                    <button onClick={(e) => { e.stopPropagation(); setDeleteConfirmId(project.id); }} className="absolute top-4 right-4 text-slate-500 hover:text-slate-800 text-xs opacity-0 group-hover:opacity-100 transition-opacity">刪除</button>
-                    
-                    <div className="space-y-2 w-full pt-1"> 
-                      <div className="flex justify-between items-start gap-2">
-                        <span className="text-md font-bold tracking-tight text-slate-800 leading-snug">{project.name}</span>
-                        {todoSummary && (
-                          <span className="text-[10px] font-mono bg-white/50 text-slate-700 px-1.5 py-0.5 rounded-md font-bold shadow-xs shrink-0">
-                            📋 {todoSummary}
-                          </span>
-                        )}
-                      </div>
-                      <span className="text-[12px] text-slate-600/90 block line-clamp-4 font-light whitespace-pre-line leading-relaxed">{project.desc || '點擊填寫內容...'}</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* 💡 擴充：彈窗內置專屬待辦清單 (To-Do List) 功能 */}
-        {activeProjectId && currentProject && (
-          <div className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
-            <div className="bg-white rounded-2xl max-w-3xl w-full p-6 relative shadow-2xl border border-slate-100 grid grid-cols-1 md:grid-cols-12 gap-6 overflow-hidden max-h-[90vh]">
-              <div className="absolute top-0 left-0 right-0 h-1" style={{ backgroundColor: currentProject.color }} />
+            {/* 左右分割大區塊 */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
               
-              {/* 左側：項目基本資料與大筆記 */}
-              <div className="md:col-span-7 space-y-4 flex flex-col overflow-y-auto pr-1">
-                <div className="flex justify-between items-center mt-2">
-                  <input type="text" value={currentProject.name} onChange={e => handleProjectUpdate(currentProject.id, { name: e.target.value })} className="bg-slate-50 text-slate-800 font-medium text-lg rounded-xl px-3 py-1.5 w-full border border-slate-100 focus:bg-white" />
-                </div>
-                <input type="text" value={currentProject.desc} onChange={e => handleProjectUpdate(currentProject.id, { desc: e.target.value })} className="bg-slate-50 text-slate-500 text-xs rounded-xl px-3 py-2 w-full border border-slate-100 focus:bg-white" />
+              {/* 【左側面板 - 7格】：馬卡龍項目方塊列表 */}
+              <div className="lg:col-span-7 space-y-6">
                 
-                <div className="flex-1 flex flex-col space-y-1.5 min-h-[180px]">
-                  <label className="text-[11px] text-slate-400 font-mono font-bold tracking-wider">詳細筆記與備忘</label>
-                  <textarea value={currentProject.notes || ''} onChange={e => handleProjectUpdate(currentProject.id, { notes: e.target.value })} className="w-full flex-1 bg-slate-50 text-slate-700 text-xs rounded-xl p-3 focus:outline-none border border-slate-100 focus:bg-white resize-none leading-relaxed" placeholder="在這裡寫下詳細的脈絡、進度或想法..." />
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-[11px] text-slate-400 font-mono font-bold tracking-wider">連結參考</label>
-                  <div className="flex gap-2">
-                    <input type="text" value={currentProject.link || ''} onChange={e => handleProjectUpdate(currentProject.id, { link: e.target.value })} className="bg-slate-50 text-slate-700 text-xs rounded-xl px-3 py-1.5 flex-1 border border-slate-100 focus:bg-white" placeholder="https://..." />
-                    {currentProject.link && <a href={currentProject.link} target="_blank" rel="noopener noreferrer" className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs px-3 py-1.5 rounded-xl flex items-center shadow-xs">開啟</a>}
+                <div className="flex justify-between items-center bg-white/65 backdrop-blur-md p-5 rounded-2xl border border-white/60 shadow-xs">
+                  <div className="space-y-0.5">
+                    <h2 className="text-lg font-bold text-slate-800 tracking-tight">
+                      {currentView === 'work' ? systemState.workTitle : currentView === 'personal' ? systemState.personalTitle : systemState.mindTitle}
+                    </h2>
+                    <p className="text-slate-400 text-xs font-light">{currentView === 'work' ? systemState.workDesc : currentView === 'personal' ? systemState.personalDesc : systemState.mindDesc}</p>
                   </div>
-                </div>
-              </div>
-
-              {/* 右側：專屬待辦事項區面版 */}
-              <div className="md:col-span-5 border-t md:border-t-0 md:border-l border-slate-100 pt-4 md:pt-0 md:pl-6 flex flex-col max-h-[400px] md:max-h-full">
-                <div className="flex justify-between items-center mb-3 mt-2">
-                  <label className="text-[11px] text-slate-400 font-mono font-bold tracking-wider">📋 專屬待辦清單</label>
-                  <button onClick={() => setActiveProjectId(null)} className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs">關閉</button>
+                  <button onClick={() => handleAddProject(currentView)} className="bg-slate-800 hover:bg-slate-900 text-white text-xs px-4 py-2.5 rounded-xl font-medium shadow-sm transition-all">新增項目</button>
                 </div>
 
-                {/* 待辦列表滾動區 */}
-                <div className="flex-1 overflow-y-auto space-y-2 mb-4 pr-1 min-h-[150px]">
-                  {(currentProject.todos || []).length === 0 ? (
-                    <div className="h-full flex items-center justify-center text-slate-300 text-xs font-light tracking-wide py-10">目前沒有待辦事項</div>
-                  ) : (
-                    (currentProject.todos || []).map(todo => (
-                      <div key={todo.id} className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-100 text-xs group">
-                        <label className="flex items-center gap-2.5 cursor-pointer flex-1 min-w-0">
-                          <input 
-                            type="checkbox" 
-                            checked={todo.completed} 
-                            onChange={() => handleToggleTodo(currentProject.id, todo.id)}
-                            className="rounded text-pink-500 focus:ring-pink-200 w-3.5 h-3.5 accent-pink-500 cursor-pointer"
-                          />
-                          <span className={`truncate ${todo.completed ? 'line-through text-slate-300' : 'text-slate-600 font-light'}`}>
-                            {todo.text}
-                          </span>
-                        </label>
-                        <button 
-                          onClick={() => handleDeleteTodo(currentProject.id, todo.id)} 
-                          className="text-[10px] text-slate-300 hover:text-red-400 md:opacity-0 group-hover:opacity-100 transition-opacity ml-2"
-                        >
-                          ✕
-                        </button>
+                {/* 方塊網格 */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {displayedProjects.map(project => {
+                    const colorSetup = COLOR_MAPS[project.color] || { from: project.color, to: project.color, shadow: 'rgba(0,0,0,0.05)' };
+                    const todoSummary = getTodoSummary(project);
+                    const isSelected = currentProject?.id === project.id;
+                    
+                    return (
+                      <div 
+                        key={project.id}
+                        draggable={true}
+                        onDragStart={() => setDraggedId(project.id)}
+                        onDragOver={e => e.preventDefault()}
+                        onDrop={(e) => handleDropOnCard(e, project.id)}
+                        onClick={() => setActiveProjectId(project.id)}
+                        className={`cursor-pointer rounded-2xl p-5 flex flex-col justify-between min-h-[140px] transition-all duration-300 group relative border backdrop-blur-md select-none ${isSelected ? 'ring-2 ring-slate-800 ring-offset-2 scale-[1.01]' : 'hover:-translate-y-0.5'}`}
+                        style={{ 
+                          background: `linear-gradient(135deg, ${colorSetup.from}ee, ${colorSetup.to}cc)`,
+                          borderColor: isSelected ? '#1e293b' : 'rgba(255,255,255,0.4)',
+                          boxShadow: `0 8px 20px -5px ${colorSetup.shadow}`
+                        }}
+                      >
+                        <button onClick={(e) => { e.stopPropagation(); setDeleteConfirmId(project.id); }} className="absolute top-4 right-4 text-slate-500 hover:text-red-600 text-[11px] opacity-0 group-hover:opacity-100 transition-opacity">刪除</button>
+                        
+                        <div className="space-y-1.5 w-full pt-1"> 
+                          <div className="flex justify-between items-start gap-2">
+                            <span className="text-md font-bold tracking-tight text-slate-800 leading-snug">{project.name}</span>
+                            {todoSummary && (
+                              <span className="text-[10px] font-mono bg-white/60 text-slate-700 px-1.5 py-0.5 rounded-md font-bold shadow-2xs shrink-0">
+                                📋 {todoSummary}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[12px] text-slate-600/90 block line-clamp-3 font-light whitespace-pre-line leading-relaxed">{project.desc || '點擊右側編輯此項目描述...'}</span>
+                        </div>
                       </div>
-                    ))
+                    );
+                  })}
+                  {displayedProjects.length === 0 && (
+                    <div className="col-span-2 text-center py-12 text-slate-400 font-light text-xs">目前還沒有項目，點擊上方新增一個吧！</div>
                   )}
                 </div>
-
-                {/* 新增待辦表單 */}
-                <form onSubmit={(e) => handleAddTodo(currentProject.id, e)} className="flex gap-2 border-t border-slate-100 pt-3">
-                  <input 
-                    type="text" 
-                    value={newTodoText} 
-                    onChange={e => setNewTodoText(e.target.value)} 
-                    placeholder="新增待辦步驟..." 
-                    className="bg-slate-50 border border-slate-100 text-xs rounded-xl px-3 py-2 flex-1 focus:outline-none focus:bg-white text-slate-700"
-                  />
-                  <button type="submit" className="bg-slate-800 hover:bg-slate-900 text-white text-xs px-3.5 rounded-xl font-medium shadow-xs">添加</button>
-                </form>
-
-                <div className="mt-4 pt-3 border-t border-slate-100 flex justify-end">
-                  <select value={currentProject.belongsTo} onChange={e => {
-                    const targetZone = e.target.value as 'work' | 'personal' | 'mind';
-                    handleProjectUpdate(currentProject.id, { belongsTo: targetZone });
-                    setActiveProjectId(null);
-                    setCurrentView(targetZone);
-                  }} className="bg-slate-50 text-slate-400 hover:text-slate-600 text-[11px] px-2.5 py-1.5 rounded-xl border border-slate-100 focus:outline-none font-medium">
-                    <option value="work">移至 工作區</option>
-                    <option value="personal">移至 生活區</option>
-                    <option value="mind">移至 知識庫</option>
-                  </select>
-                </div>
               </div>
+
+              {/* 【右側面板 - 5格】：常駐專屬待辦清單 (To-Do List) 與詳細編輯面版 */}
+              <div className="lg:col-span-5 bg-white/80 backdrop-blur-md border border-white/60 rounded-2xl p-6 shadow-sm min-h-[500px] flex flex-col justify-between sticky top-8">
+                {currentProject ? (
+                  <div className="space-y-5 flex-1 flex flex-col justify-between h-full">
+                    
+                    <div className="space-y-4">
+                      {/* 標題欄位編輯 */}
+                      <div>
+                        <label className="text-[10px] text-slate-400 font-mono font-bold tracking-wider uppercase block mb-1">項目名稱</label>
+                        <input type="text" value={currentProject.name} onChange={e => handleProjectUpdate(currentProject.id, { name: e.target.value })} className="bg-slate-50/60 text-slate-800 font-bold text-base rounded-xl px-3 py-2 w-full border border-slate-100 focus:bg-white transition-colors focus:outline-none" />
+                      </div>
+
+                      {/* 簡短摘要編輯 */}
+                      <div>
+                        <label className="text-[10px] text-slate-400 font-mono font-bold tracking-wider uppercase block mb-1">簡短摘要描述</label>
+                        <input type="text" value={currentProject.desc} onChange={e => handleProjectUpdate(currentProject.id, { desc: e.target.value })} className="bg-slate-50/60 text-slate-600 text-xs rounded-xl px-3 py-2 w-full border border-slate-100 focus:bg-white transition-colors focus:outline-none" />
+                      </div>
+
+                      <hr className="border-slate-100 my-1" />
+
+                      {/* 核心待辦清單區塊 */}
+                      <div>
+                        <div className="flex justify-between items-center mb-2">
+                          <label className="text-[11px] text-slate-400 font-mono font-bold tracking-wider">📋 專屬待辦步驟</label>
+                          <span className="text-[10px] bg-slate-100 px-2 py-0.5 text-slate-500 rounded-md font-mono">{getTodoSummary(currentProject) || '0/0'}</span>
+                        </div>
+
+                        {/* 待辦事項列表 */}
+                        <div className="space-y-1.5 max-h-[180px] overflow-y-auto pr-1">
+                          {(currentProject.todos || []).length === 0 ? (
+                            <div className="text-center text-slate-300 text-xs font-light py-6 border border-dashed border-slate-100 rounded-xl">在下方輸入步驟來建立待辦清單</div>
+                          ) : (
+                            (currentProject.todos || []).map(todo => (
+                              <div key={todo.id} className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50/50 border border-slate-100/70 text-xs group transition-all hover:bg-white">
+                                <label className="flex items-center gap-2.5 cursor-pointer flex-1 min-w-0">
+                                  <input 
+                                    type="checkbox" 
+                                    checked={todo.completed} 
+                                    onChange={() => handleToggleTodo(currentProject.id, todo.id)}
+                                    className="rounded text-pink-500 focus:ring-pink-200 w-3.5 h-3.5 accent-pink-500 cursor-pointer"
+                                  />
+                                  <span className={`truncate ${todo.completed ? 'line-through text-slate-300' : 'text-slate-700 font-light'}`}>
+                                    {todo.text}
+                                  </span>
+                                </label>
+                                <button 
+                                  onClick={() => handleDeleteTodo(currentProject.id, todo.id)} 
+                                  className="text-[10px] text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity ml-2 px-1"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            ))
+                          )}
+                        </div>
+
+                        {/* 新增待辦輸入欄 */}
+                        <form onSubmit={(e) => handleAddTodo(currentProject.id, e)} className="flex gap-2 mt-2">
+                          <input 
+                            type="text" 
+                            value={newTodoText} 
+                            onChange={e => setNewTodoText(e.target.value)} 
+                            placeholder="新增一個待辦事項..." 
+                            className="bg-slate-50 border border-slate-100 text-xs rounded-xl px-3 py-2 flex-1 focus:outline-none focus:bg-white text-slate-700 transition-all"
+                          />
+                          <button type="submit" className="bg-slate-800 hover:bg-slate-900 text-white text-xs px-3.5 rounded-xl font-medium shadow-2xs">添加</button>
+                        </form>
+                      </div>
+
+                      {/* 長篇詳細筆記 */}
+                      <div className="flex flex-col space-y-1">
+                        <label className="text-[10px] text-slate-400 font-mono font-bold tracking-wider uppercase">詳細研討筆記備忘</label>
+                        <textarea value={currentProject.notes || ''} onChange={e => handleProjectUpdate(currentProject.id, { notes: e.target.value })} className="w-full bg-slate-50 text-slate-700 text-xs rounded-xl p-3 focus:outline-none border border-slate-100 focus:bg-white resize-none leading-relaxed h-[100px]" placeholder="在這裡自由紀錄更長的心得、細節或專案大綱..." />
+                      </div>
+                    </div>
+
+                    {/* 底部輔助工具 */}
+                    <div className="pt-3 border-t border-slate-100 flex justify-between items-center gap-2">
+                      <div className="flex items-center gap-1.5 flex-1">
+                        <span className="text-[10px] text-slate-400 whitespace-nowrap">參考連結</span>
+                        <input type="text" value={currentProject.link || ''} onChange={e => handleProjectUpdate(currentProject.id, { link: e.target.value })} className="bg-slate-50 text-slate-600 text-[11px] rounded-lg px-2 py-1 flex-1 border border-slate-100 focus:outline-none focus:bg-white" placeholder="https://..." />
+                        {currentProject.link && <a href={currentProject.link} target="_blank" rel="noopener noreferrer" className="bg-slate-100 text-slate-600 text-[10px] px-2 py-1 rounded-lg hover:bg-slate-200">開啟</a>}
+                      </div>
+
+                      <select value={currentProject.belongsTo} onChange={e => {
+                        const targetZone = e.target.value as 'work' | 'personal' | 'mind';
+                        handleProjectUpdate(currentProject.id, { belongsTo: targetZone });
+                        setCurrentView(targetZone);
+                      }} className="bg-slate-50 text-slate-400 hover:text-slate-600 text-[10px] px-2 py-1 rounded-lg border border-slate-100 focus:outline-none font-medium">
+                        <option value="work">移至 工作區</option>
+                        <option value="personal">移至 生活區</option>
+                        <option value="mind">移至 知識庫</option>
+                      </select>
+                    </div>
+
+                  </div>
+                ) : (
+                  <div className="h-full flex items-center justify-center text-slate-300 text-xs font-light py-20">請先建立或選取項目</div>
+                )}
+              </div>
+
             </div>
           </div>
         )}
 
-        {/* 刪除確認防防呆 */}
+        {/* 刪除確認防呆視窗 */}
         {deleteConfirmId && (
-          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-2xs flex items-center justify-center p-4 z-50">
             <div className="bg-white rounded-2xl max-w-sm w-full p-6 text-center shadow-2xl border border-slate-100">
               <span className="text-4xl mb-3 block">🌸</span>
               <h3 className="text-md font-bold text-slate-800 mb-2">確定要刪除這個馬卡龍方塊嗎？</h3>
-              <p className="text-slate-400 text-xs mb-6">此動作將連同內部的所有待辦事項一併永久移除！</p>
+              <p className="text-slate-400 text-xs mb-6">此動作將連同右側的所有待辦步驟一併永久移除！</p>
               <div className="flex gap-3 justify-center">
                 <button onClick={() => setDeleteConfirmId(null)} className="px-4 py-2 rounded-xl bg-slate-100 text-slate-600 text-xs font-medium">取消</button>
                 <button onClick={handleConfirmDelete} className="px-4 py-2 rounded-xl bg-pink-500 hover:bg-pink-600 text-white text-xs font-medium shadow-sm">確認刪除</button>
