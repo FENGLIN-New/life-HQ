@@ -3,7 +3,6 @@
 import React, { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
-// 初始化 Supabase 前端客戶端
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
@@ -52,7 +51,7 @@ const COLOR_MAPS: Record<string, { from: string; to: string; shadow: string }> =
   '#D4F0F0': { from: '#D4F0F0', to: '#E6FAFA', shadow: 'rgba(212, 240, 240, 0.4)' },
   '#CCE2CB': { from: '#CCE2CB', to: '#E2F0E1', shadow: 'rgba(204, 226, 203, 0.4)' },
   '#FFDFD3': { from: '#FFDFD3', to: '#FFF0EA', shadow: 'rgba(255, 223, 211, 0.4)' },
-  '#E8AEB7': { from: '#E8AEB7', to: '#F4C2C2', shadow: 'rgba(232, 174, 183, 0.4)' }, // 修正：將 #F4CStatus 改為合法色碼
+  '#E8AEB7': { from: '#E8AEB7', to: '#F4C2C2', shadow: 'rgba(232, 174, 183, 0.4)' },
   '#B7CFB7': { from: '#B7CFB7', to: '#D3E2D3', shadow: 'rgba(183, 207, 183, 0.4)' },
   '#D7C49E': { from: '#D7C49E', to: '#E8DCBF', shadow: 'rgba(215, 196, 158, 0.4)' },
   '#B18597': { from: '#B18597', to: '#CFA4B7', shadow: 'rgba(177, 133, 151, 0.4)' },
@@ -60,88 +59,107 @@ const COLOR_MAPS: Record<string, { from: string; to: string; shadow: string }> =
 
 const MACARON_PALETTE = Object.keys(COLOR_MAPS);
 
-const BACKUP_WORDS = {
-  english: [
-    { word: 'Stagnation', detail: '(n.) 停滯、不景氣 - 常用於經濟新聞描述市場增長緩慢' },
-    { word: 'Leverage', detail: '(v./n.) 槓桿、利用 - 商業新聞中指利用既有優勢取得更大成效' },
-    { word: 'Volatility', detail: '(n.) 波動性 - 常用於股市、外匯與加密貨幣的價格劇烈變動' }
-  ],
-  thai: [
-    { word: 'การเจรจาต่อรอง', detail: '(kan-chen-ra-cha-tor-rong) 商業談判 - 用於商務合約與條件協議' },
-    { word: 'พันธมิตรทางธุรกิจ', detail: '(phan-tha-mit-thang-thu-ra-kit-sa) 商業戰略夥伴 - 企業結盟常用語' },
-    { word: 'ต้นทุนทุนทรัพย์', detail: '(ton-thun-thun-sa-rap) 資本成本 - 財務與商業投資分析術語' }
-  ]
-};
-
 export default function Home() {
   const [isInitialized, setIsInitialized] = useState(false);
   const [currentView, setCurrentView] = useState<'welcome' | 'work' | 'personal' | 'mind'>('welcome');
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [newMemoText, setNewMemoText] = useState('');
-  const [apiEnglishWord, setApiEnglishWord] = useState({ word: 'Loading...', detail: '正在載入今日高頻新聞英文...' });
-  const [apiThaiWord, setApiThaiWord] = useState({ word: 'Loading...', detail: '正在載入今日商業泰語...' });
+  
+  // 初始狀態設為載入中
+  const [apiEnglishWord, setApiEnglishWord] = useState({ word: 'Loading...', detail: '連線資料庫撈取今日新聞英文...' });
+  const [apiThaiWord, setApiThaiWord] = useState({ word: 'Loading...', detail: '連線資料庫撈取今日商業泰語...' });
   
   const [supabaseMemos, setSupabaseMemos] = useState<MemoItem[]>([]);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
-  const [systemState, setSystemState] = useState<SystemState>({
-    workTitle: '工作領域',
-    workDesc: '日常教學、行政事務與商業專案',
-    personalTitle: '私人生活',
-    personalDesc: '健康管理、日常興趣與生活調劑',
-    mindTitle: '異想知識庫',
-    mindDesc: '靈感閃現、奇思妙想與知識筆記',
-    projects: [
-      { id: 'w-1', name: '工作項目一', desc: '點擊修改內容與詳細筆記', belongsTo: 'work', color: '#B5EAEA', notes: '', link: '' },
-      { id: 'w-2', name: '工作項目二', desc: '點擊修改內容與詳細筆記', belongsTo: 'work', color: '#EDF6E8', notes: '', link: '' },
-      { id: 'w-3', name: '工作項目三', desc: '點擊修改內容與詳細筆記', belongsTo: 'work', color: '#B39CD0', notes: '', link: '' },
-      { id: 'p-1', name: '生活項目一', desc: '點擊修改內容與詳細筆記', belongsTo: 'personal', color: '#FFB4B4', notes: '', link: '' },
-      { id: 'p-2', name: '生活項目二', desc: '點擊修改內容與詳細筆記', belongsTo: 'personal', color: '#FFCCB6', notes: '', link: '' },
-      { id: 'p-3', name: '生活項目三', desc: '點擊修改內容與詳細筆記', belongsTo: 'personal', color: '#FFDEB4', notes: '', link: '' },
-      { id: 'm-1', name: '知識靈感一', desc: '在這裡記錄隨手拈來的奇思妙想...', belongsTo: 'mind', color: '#FFDEB4', notes: '', link: '' },
-      { id: 'm-2', name: '知識靈感二', desc: '在這裡記錄隨手拈來的奇思妙想...', belongsTo: 'mind', color: '#D4A5B8', notes: '', link: '' },
-      { id: 'm-3', name: '知識靈感三', desc: '在這裡記錄隨手拈來的奇思妙想...', belongsTo: 'mind', color: '#FDFDBD', notes: '', link: '' }
-    ],
-    memos: [
-      { id: 'memo-1', text: '歡迎來到你的專屬減壓小宇宙', color: '#FFDEB4' },
-      { id: 'memo-2', text: '你不需要每天都很完美，只要前進就好。', color: '#B5EAEA' }
-    ]
+  // Lazy Initialization 讀取 LocalStorage 控制代碼
+  const [systemState, setSystemState] = useState<SystemState>(() => {
+    const defaultState: SystemState = {
+      workTitle: '工作領域',
+      workDesc: '日常教學、行政事務與商業專案',
+      personalTitle: '私人生活',
+      personalDesc: '健康管理、日常興趣與生活調劑',
+      mindTitle: '異想知識庫',
+      mindDesc: '靈感閃現、奇思妙想與知識筆記',
+      projects: [
+        { id: 'w-1', name: '工作項目一', desc: '點擊修改內容與詳細筆記', belongsTo: 'work', color: '#B5EAEA', notes: '', link: '' },
+        { id: 'w-2', name: '工作項目二', desc: '點擊修改內容與詳細筆記', belongsTo: 'work', color: '#EDF6E8', notes: '', link: '' },
+        { id: 'w-3', name: '工作項目三', desc: '點擊修改內容與詳細筆記', belongsTo: 'work', color: '#B39CD0', notes: '', link: '' },
+        { id: 'p-1', name: '生活項目一', desc: '點擊修改內容與詳細筆記', belongsTo: 'personal', color: '#FFB4B4', notes: '', link: '' },
+        { id: 'p-2', name: '生活項目二', desc: '點擊修改內容與詳細筆記', belongsTo: 'personal', color: '#FFCCB6', notes: '', link: '' },
+        { id: 'p-3', name: '生活項目三', desc: '點擊修改內容與詳細筆記', belongsTo: 'personal', color: '#FFDEB4', notes: '', link: '' },
+        { id: 'm-1', name: '知識靈感一', desc: '在這裡記錄隨手拈來的奇思妙想...', belongsTo: 'mind', color: '#FFDEB4', notes: '', link: '' },
+        { id: 'm-2', name: '知識靈感二', desc: '在這裡記錄隨手拈來的奇思妙想...', belongsTo: 'mind', color: '#D4A5B8', notes: '', link: '' },
+        { id: 'm-3', name: '知識靈感三', desc: '在這裡記錄隨手拈來的奇思妙想...', belongsTo: 'mind', color: '#FDFDBD', notes: '', link: '' }
+      ],
+      memos: [
+        { id: 'memo-1', text: '歡迎來到你的專屬減壓小宇宙', color: '#FFDEB4' },
+        { id: 'memo-2', text: '你不需要每天都很完美，只要前進就好。', color: '#B5EAEA' }
+      ]
+    };
+
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('life_hq_user_universe_data');
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (parsed && Array.isArray(parsed.projects)) {
+            return parsed;
+          }
+        } catch (e) {
+          console.error('LocalStorage 解析失敗:', e);
+        }
+      }
+    }
+    return defaultState;
   });
 
-  // 統一由 useEffect 監聽並同步到 LocalStorage，避免在 setState 區塊呼叫帶來的非同步風險
   useEffect(() => {
     if (isInitialized) {
       localStorage.setItem('life_hq_user_universe_data', JSON.stringify(systemState));
     }
   }, [systemState, isInitialized]);
 
-  const fetchDailyWords = () => {
-    const randomIdx = Math.floor(Math.random() * BACKUP_WORDS.english.length);
-    setTimeout(() => {
-      setApiEnglishWord(BACKUP_WORDS.english[randomIdx]);
-      setApiThaiWord(BACKUP_WORDS.thai[randomIdx]);
-    }, 400);
+  // 🔴 核心改動：改為直接向 Supabase 隨機抽樣撈取單字
+  const fetchDailyWordsFromCloud = async () => {
+    if (!supabase) return;
+    
+    try {
+      // 撈取英文 (隨機抽樣 1 筆)
+      const { data: engData, error: engErr } = await supabase
+        .from('daily_words')
+        .select('word, detail')
+        .eq('type', 'english');
+        
+      if (!engErr && engData && engData.length > 0) {
+        const randomEng = engData[Math.floor(Math.random() * engData.length)];
+        setApiEnglishWord(randomEng);
+      } else {
+        setApiEnglishWord({ word: '無單字資料', detail: '請先在 Supabase 雲端資料庫新增英文單字。' });
+      }
+
+      // 撈取泰文 (隨機抽樣 1 筆)
+      const { data: thaiData, error: thaiErr } = await supabase
+        .from('daily_words')
+        .select('word, detail')
+        .eq('type', 'thai');
+        
+      if (!thaiErr && thaiData && thaiData.length > 0) {
+        const randomThai = thaiData[Math.floor(Math.random() * thaiData.length)];
+        setApiThaiWord(randomThai);
+      } else {
+        setApiThaiWord({ word: '無單字資料', detail: '請先在 Supabase 雲端資料庫新增泰文單字。' });
+      }
+    } catch (e) {
+      console.error('雲端單字庫讀取異常:', e);
+    }
   };
 
   useEffect(() => {
     document.title = "Life HQ-我的小宇宙";
-
-    // 1. 載入 LocalStorage 狀態
-    const savedNew = localStorage.getItem('life_hq_user_universe_data');
-    if (savedNew) {
-      try {
-        const parsed = JSON.parse(savedNew);
-        if (parsed && Array.isArray(parsed.projects)) {
-          setSystemState(parsed);
-        }
-      } catch(e) {
-        console.error(e);
-      }
-    }
     setIsInitialized(true);
-    fetchDailyWords();
+    fetchDailyWordsFromCloud();
 
-    // 2. 如果 Supabase 設定成功，處理雲端串接與即時監聽
     if (!supabase) return;
 
     let channel: any;
@@ -163,14 +181,12 @@ export default function Home() {
         setSupabaseMemos(cloudMemos);
       }
 
-      // 開啟即時監聽
       channel = supabase
         .channel('schema-db-changes')
         .on(
           'postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'ideas' },
           (payload) => {
-            console.log('偵測到 LINE 送來了新靈感！', payload.new);
             const newIdea = payload.new as { id: number; text: string };
             const freshMemo: MemoItem = {
               id: `sb-${newIdea.id}`,
@@ -325,7 +341,6 @@ export default function Home() {
 
       <div className={`mx-auto transition-all duration-300 relative z-10 ${currentView === 'welcome' ? 'max-w-6xl' : 'max-w-[95%]'}`}>
         
-        {/* 頁首軌跡 */}
         <div className="text-[11px] text-pink-400 font-mono mb-8 tracking-widest flex items-center gap-2 select-none">
           <span className="cursor-pointer hover:text-pink-600 transition-colors" onClick={() => setCurrentView('welcome')}>MY_SPACE</span>
           {currentView !== 'welcome' && (
@@ -336,10 +351,8 @@ export default function Home() {
           )}
         </div>
 
-        {/* 【大首頁視圖】 */}
         {currentView === 'welcome' && (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 py-6">
-            {/* 左側：三大入口 */}
             <div className="lg:col-span-7 space-y-6">
               <div>
                 <h1 className="text-4xl font-light tracking-tight text-slate-800">屬於我的小宇宙</h1>
@@ -349,7 +362,6 @@ export default function Home() {
                 <h2 className="text-xs font-semibold text-slate-400 tracking-wider mb-4 uppercase">切換空間</h2>
                 <div className="space-y-5">
                   
-                  {/* 工作領域卡片 */}
                   <div onClick={() => setCurrentView('work')} className="group cursor-pointer bg-gradient-to-br from-[#E8F4F8]/85 to-[#Cbe3eb]/70 backdrop-blur-md rounded-2xl p-6 hover:shadow-xl hover:shadow-blue-300/30 transition-all duration-300 shadow-sm active:scale-[0.99] hover:-translate-y-0.5 border border-white/40">
                     <div className="flex justify-between items-center">
                       <div>
@@ -360,7 +372,6 @@ export default function Home() {
                     </div>
                   </div>
                   
-                  {/* 私人生活卡片 */}
                   <div onClick={() => setCurrentView('personal')} className="group cursor-pointer bg-gradient-to-br from-[#FFF0F2]/90 to-[#Fcdde2]/75 backdrop-blur-md rounded-2xl p-6 hover:shadow-xl hover:shadow-pink-300/30 transition-all duration-300 shadow-sm active:scale-[0.99] hover:-translate-y-0.5 border border-white/40">
                     <div className="flex justify-between items-center">
                       <div>
@@ -371,7 +382,6 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* 異想知識庫卡片 */}
                   <div onClick={() => setCurrentView('mind')} className="group cursor-pointer bg-gradient-to-br from-[#F3EAF8]/85 to-[#E1cbed]/70 backdrop-blur-md rounded-2xl p-6 hover:shadow-xl hover:shadow-purple-300/30 transition-all duration-300 shadow-sm active:scale-[0.99] hover:-translate-y-0.5 border border-white/40">
                     <div className="flex justify-between items-center">
                       <div>
@@ -386,11 +396,13 @@ export default function Home() {
               </div>
             </div>
 
-            {/* 右側：小工具 */}
             <div className="lg:col-span-5 bg-white/70 backdrop-blur-md border border-white/50 rounded-2xl p-6 shadow-sm flex flex-col justify-between min-h-[480px]">
               <div className="space-y-6">
                 <div>
-                  <h2 className="text-xs font-semibold text-slate-400 tracking-wider mb-3 uppercase">今日自我增強計畫</h2>
+                  <div className="flex justify-between items-center mb-3">
+                    <h2 className="text-xs font-semibold text-slate-400 tracking-wider uppercase">今日雲端增強計畫</h2>
+                    <button type="button" onClick={fetchDailyWordsFromCloud} className="text-[10px] text-pink-500 hover:text-pink-600 font-mono transition-colors">🔄 雲端隨機換字</button>
+                  </div>
                   <div className="space-y-2.5">
                     <div className="p-3.5 rounded-xl bg-white/60 border border-white text-xs shadow-sm">
                       <div className="font-bold text-slate-700 text-sm tracking-tight">{apiEnglishWord.word}</div>
@@ -442,9 +454,8 @@ export default function Home() {
           </div>
         )}
 
-        {/* 【獨立專頁視圖】 */}
         {currentView !== 'welcome' && (
-          <div className="space-y-6 animate-fadeIn">
+          <div className="space-y-6">
             <div className="flex justify-between items-center border-b border-black/5 pb-5">
               <button onClick={() => setCurrentView('welcome')} className="px-4 py-2 rounded-xl bg-white/80 backdrop-blur-sm border border-white/60 hover:bg-white text-slate-600 text-xs transition-colors shadow-sm font-medium">返回首頁</button>
               <div className="text-[10px] text-slate-400 font-mono select-none">
@@ -462,7 +473,6 @@ export default function Home() {
               <button onClick={() => handleAddProject(currentView)} className="bg-white hover:bg-slate-50 text-slate-700 text-xs px-5 py-2.5 rounded-xl border border-slate-200 transition-colors font-medium shadow-sm shrink-0">新增項目</button>
             </div>
 
-            {/* 滿版通透漸層色塊網格 */}
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6 pt-2">
               {displayedProjects.map(project => {
                 const colorSetup = COLOR_MAPS[project.color] || { from: project.color, to: project.color, shadow: 'rgba(0,0,0,0.05)' };
@@ -483,7 +493,7 @@ export default function Home() {
                   >
                     <button 
                       onClick={(e) => triggerDeleteProject(project.id, e)} 
-                      onDragStart={(e) => e.preventDefault()} // 防止拖曳按鈕觸發卡片拖曳
+                      onDragStart={(e) => e.preventDefault()} 
                       className="absolute top-4 right-4 text-slate-500 hover:text-slate-800 text-xs opacity-0 group-hover:opacity-100 transition-opacity font-medium z-10"
                     >
                       刪除
@@ -500,7 +510,6 @@ export default function Home() {
           </div>
         )}
 
-        {/* 彈窗編輯詳細內容 */}
         {activeProjectId && currentProject && (
           <div className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn">
             <div className="bg-white rounded-2xl max-w-xl w-full p-6 relative shadow-2xl overflow-hidden border border-slate-100">
@@ -542,9 +551,8 @@ export default function Home() {
           </div>
         )}
 
-        {/* 客製化馬卡龍刪除防呆彈窗 */}
         {deleteConfirmId && (
-          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn">
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
             <div className="bg-white rounded-2xl max-w-sm w-full p-6 text-center shadow-2xl border border-slate-100">
               <span className="text-4xl mb-3 block">🌸</span>
               <h3 className="text-md font-bold text-slate-800 mb-2">確定要刪除這個馬卡龍方塊嗎？</h3>
