@@ -411,8 +411,8 @@ export default function Home() {
                   <button onClick={() => handleAddProject(currentView)} className="bg-slate-800 hover:bg-slate-900 text-white text-xs px-4 py-2.5 rounded-xl font-medium shadow-sm transition-all">新增項目</button>
                 </div>
 
-                {/* 方塊網格 */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* 方塊網格：強迫改成 grid-cols-1 讓它們像首頁一樣垂直整齊排成一列 */}
+                <div className="grid grid-cols-1 gap-4">
                   {displayedProjects.map(project => {
                     const colorSetup = COLOR_MAPS[project.color] || { from: project.color, to: project.color, shadow: 'rgba(0,0,0,0.05)' };
                     const todoSummary = getTodoSummary(project);
@@ -426,7 +426,7 @@ export default function Home() {
                         onDragOver={e => e.preventDefault()}
                         onDrop={(e) => handleDropOnCard(e, project.id)}
                         onClick={() => setActiveProjectId(project.id)}
-                        className={`cursor-pointer rounded-2xl p-5 flex flex-col justify-between min-h-[140px] transition-all duration-300 group relative border backdrop-blur-md select-none ${isSelected ? 'ring-2 ring-slate-800 ring-offset-2 scale-[1.01]' : 'hover:-translate-y-0.5'}`}
+                        className={`cursor-pointer rounded-2xl p-6 flex flex-col justify-between min-h-[100px] transition-all duration-300 group relative border backdrop-blur-md select-none ${isSelected ? 'ring-2 ring-slate-800 ring-offset-2 scale-[1.01]' : 'hover:-translate-y-0.5'}`}
                         style={{ 
                           background: `linear-gradient(135deg, ${colorSetup.from}ee, ${colorSetup.to}cc)`,
                           borderColor: isSelected ? '#1e293b' : 'rgba(255,255,255,0.4)',
@@ -435,22 +435,22 @@ export default function Home() {
                       >
                         <button onClick={(e) => { e.stopPropagation(); setDeleteConfirmId(project.id); }} className="absolute top-4 right-4 text-slate-500 hover:text-red-600 text-[11px] opacity-0 group-hover:opacity-100 transition-opacity">刪除</button>
                         
-                        <div className="space-y-1.5 w-full pt-1"> 
-                          <div className="flex justify-between items-start gap-2">
-                            <span className="text-md font-bold tracking-tight text-slate-800 leading-snug">{project.name}</span>
-                            {todoSummary && (
-                              <span className="text-[10px] font-mono bg-white/60 text-slate-700 px-1.5 py-0.5 rounded-md font-bold shadow-2xs shrink-0">
-                                📋 {todoSummary}
-                              </span>
-                            )}
+                        <div className="flex justify-between items-center w-full"> 
+                          <div className="space-y-1">
+                            <h3 className="text-base font-bold text-slate-800 leading-snug">{project.name}</h3>
+                            <p className="text-xs text-slate-600/90 font-light whitespace-pre-line leading-relaxed">{project.desc || '點擊右側編輯此項目描述...'}</p>
                           </div>
-                          <span className="text-[12px] text-slate-600/90 block line-clamp-3 font-light whitespace-pre-line leading-relaxed">{project.desc || '點擊右側編輯此項目描述...'}</span>
+                          {todoSummary && (
+                            <span className="text-[10px] font-mono bg-white/80 text-slate-700 px-2.5 py-1 rounded-xl font-bold shadow-2xs shrink-0">
+                              📋 {todoSummary}
+                            </span>
+                          )}
                         </div>
                       </div>
                     );
                   })}
                   {displayedProjects.length === 0 && (
-                    <div className="col-span-2 text-center py-12 text-slate-400 font-light text-xs">目前還沒有項目，點擊上方新增一個吧！</div>
+                    <div className="text-center py-12 text-slate-400 font-light text-xs">目前還沒有項目，點擊上方新增一個吧！</div>
                   )}
                 </div>
               </div>
