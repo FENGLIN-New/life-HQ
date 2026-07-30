@@ -13,7 +13,15 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="zh-TW">
-      <body className="bg-slate-950 text-slate-100 min-h-screen antialiased">
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Inter:wght@400;500;600&display=swap"
+          rel="stylesheet"
+        />
+      </head>
+      <body className="min-h-screen bg-white text-slate-800 antialiased" style={{ fontFamily: "'Inter', sans-serif" }}>
         {children}
       </body>
     </html>
