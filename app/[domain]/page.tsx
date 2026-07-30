@@ -2,13 +2,15 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import { domainMeta, isDomainId } from "@/lib/domains";
 import { useTopics } from "@/lib/useTopics";
 import TopicCard from "@/components/TopicCard";
 
 const displayFont = { fontFamily: "'Baloo 2', sans-serif" };
 
-export default function DomainPage({ params }: { params: { domain: string } }) {
+export default function DomainPage() {
+  const { domain } = useParams<{ domain: string }>();
   const { topics, addTopic, updateTopic, togglePin } = useTopics();
   const [showAddForm, setShowAddForm] = useState(false);
   const [formTitle, setFormTitle] = useState("");
@@ -16,7 +18,7 @@ export default function DomainPage({ params }: { params: { domain: string } }) {
   const [formNote, setFormNote] = useState("");
   const [formReminder, setFormReminder] = useState("");
 
-  if (!isDomainId(params.domain)) {
+  if (!isDomainId(domain)) {
     return (
       <div className="mx-auto max-w-2xl px-6 py-10 text-center">
         <p className="text-slate-500">找不到這個領域。</p>
@@ -27,7 +29,7 @@ export default function DomainPage({ params }: { params: { domain: string } }) {
     );
   }
 
-  const meta = domainMeta(params.domain);
+  const meta = domainMeta(domain);
   const domainTopics = topics.filter((t) => t.domain === meta.id);
   const pinned = domainTopics.filter((t) => t.pinned).sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
   const rest = domainTopics.filter((t) => !t.pinned).sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
