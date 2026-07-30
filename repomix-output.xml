@@ -1,0 +1,1450 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+app/
+  api/
+    line/
+      route.ts
+  work/
+    starup/
+      pet-souvenir/
+        page.tsx
+      page.tsx
+    page.tsx
+  favicon.ico
+  globals.css
+  layout.tsx
+  page.tsx
+components/
+  home/
+    DomainCard.tsx
+    DomainIcon.tsx
+    HomeNavigation.tsx
+    HomePage.tsx
+  ui/
+    Button.tsx
+    IconButton.tsx
+    Page.tsx
+    Section.tsx
+docs/
+  design-system.md
+lib/
+  design/
+    colors.ts
+    radius.ts
+    shadow.ts
+    spacing.ts
+    transition.ts
+public/
+  file.svg
+  globe.svg
+  home-background.png
+  home-desktop.png
+  home-mobile.png
+  next.svg
+  vercel.svg
+  window.svg
+.gitignore
+AGENTS.md
+CLAUDE.md
+eslint.config.mjs
+next.config.ts
+package.json
+postcss.config.mjs
+README.md
+tsconfig.json
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="app/api/line/route.ts">
+import { NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+
+// 初始化 Supabase 後端客戶端（使用 service_role_key 繞過 RLS）
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+const supabase =
+  supabaseUrl && supabaseServiceKey
+    ? createClient(supabaseUrl, supabaseServiceKey)
+    : null;
+
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+    const events = body.events || [];
+
+    // 如果是 LINE Webhook 的驗證請求
+    if (events.length === 0) {
+      return NextResponse.json({ status: 'ok' });
+    }
+
+    for (const event of events) {
+      // 確保收到的是文字訊息
+      if (event.type === 'message' && event.message.type === 'text') {
+        const userMessage = event.message.text.trim();
+        const userId = event.source.userId;
+        const replyToken = event.replyToken;
+
+        console.log(`收到來自用戶 ${userId} 的訊息: ${userMessage}`);
+
+        // 🔒 安全機制：只允許你本人的 LINE 帳號留言進資料庫
+        // 如果你沒有設定 MY_LINE_USER_ID，這行會先跳過驗證以確保能通，若要開啟請取消註解以下這段
+        /*
+        if (userId !== process.env.MY_LINE_USER_ID) {
+          await replyToLine(replyToken, `抱歉，此帳號為私人靈感助手，您沒有權限使用。`);
+          continue;
+        }
+        */
+
+        // 🧠 【神奇功能】：解析分類關鍵字
+        // 指令範例：「工作#今天要開會」或「學習#背5個單字」
+        let category = 'general'; // 預設分類為一般
+        let finalContent = userMessage;
+
+        if (userMessage.includes('#')) {
+          const parts = userMessage.split('#');
+          const prefix = parts[0].trim(); // "工作" 或 "學習"
+          finalContent = parts[1].trim(); // "今天要開會"
+
+          if (prefix === '工作') category = 'work';
+          if (prefix === '學習') category = 'study';
+          // 如果你有第三個領域（例如：生活），可以在這裡加一行：
+          // if (prefix === '生活') category = 'life';
+        }
+
+        // 🚀 將訊息與分類存進 Supabase 雲端資料庫
+        if (supabase) {
+          const { error } = await supabase.from('ideas').insert([
+            {
+              text: finalContent,
+              user_id: userId,
+              category: category, // 👈 新增寫入分類欄位
+            },
+          ]);
+
+          if (error) {
+            console.error('儲存至 Supabase 失敗:', error.message);
+          } else {
+            console.log(`成功將靈感存入資料庫！分類為: ${category}`);
+          }
+        } else {
+          console.warn('Supabase 未設定，跳過儲存。');
+        }
+
+        // 寄回信給用戶的手機告知儲存成功
+        const categoryNotice = category !== 'general' ? ` [分類: ${category}]` : '';
+        await replyToLine(
+          replyToken, 
+          `🛸 收到靈感！已將「${finalContent}」${categoryNotice}同步至你的 Life HQ 小宇宙。`
+        );
+      }
+    }
+
+    return NextResponse.json({ status: 'success' });
+  } catch (error: any) {
+    console.error('LINE API 路由錯誤:', error);
+    return NextResponse.json(
+      { error: 'Internal Server Error', details: error.message },
+      { status: 500 }
+    );
+  }
+}
+
+// 輔助函式：發送回覆訊息給 LINE 使用者
+async function replyToLine(replyToken: string, text: string) {
+  const lineAccessToken = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  if (!lineAccessToken) {
+    console.error('缺少 LINE_CHANNEL_ACCESS_TOKEN');
+    return;
+  }
+
+  await fetch('https://api.line.me/v2/bot/message/reply', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${lineAccessToken}`,
+    },
+    body: JSON.stringify({
+      replyToken: replyToken,
+      messages: [{ type: 'text', text: text }],
+    }),
+  });
+}
+</file>
+
+<file path="app/work/starup/pet-souvenir/page.tsx">
+import React from 'react';
+import Link from 'next/link';
+
+export default function PetSouvenirPage() {
+  return (
+    <>
+      <div className="flex justify-between items-center mt-4 px-2">
+        <Link href="/work/startup" className="text-xl opacity-70 hover:opacity-100">〈</Link>
+        <h1 className="text-lg font-medium tracking-wide text-slate-300">Pet Souvenir</h1>
+        <button className="text-xl opacity-70">•••</button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto my-4 pr-1 space-y-5" style={{ scrollbarWidth: 'none' }}>
+        <div className="text-center py-6 bg-gradient-to-b from-amber-600/10 to-transparent rounded-3xl border border-amber-500/10">
+          <span className="text-5xl block mb-3">🐾</span>
+          <h2 className="text-2xl font-bold text-white">Pet Souvenir</h2>
+          <p className="text-slate-400 text-xs mt-1">主打寵物的伴手禮產品</p>
+        </div>
+
+        <div className="bg-slate-950/60 border border-slate-800 rounded-3xl p-5 space-y-4">
+          <div className="flex justify-between items-end">
+            <div>
+              <span className="text-slate-500 text-xs block">目前進度</span>
+              <span className="text-lg font-bold text-white mt-0.5 block">產品開發</span>
+            </div>
+            <span className="text-2xl font-bold text-amber-400">40%</span>
+          </div>
+          
+          <div className="relative pt-2">
+            <div className="h-1 w-full bg-slate-800 rounded-full absolute top-4 left-0"></div>
+            <div className="h-1 w-[40%] bg-amber-500 rounded-full absolute top-4 left-0 shadow-[0_0_8px_rgba(245,158,11,0.5)]"></div>
+            
+            <div className="flex justify-between relative z-10 text-[10px] text-slate-400">
+              <div className="flex flex-col items-center gap-1.5">
+                <div className="w-2.5 h-2.5 rounded-full bg-amber-500 ring-4 ring-amber-500/20"></div>
+                <span className="text-amber-500 font-medium">構想</span>
+              </div>
+              <div className="flex flex-col items-center gap-1.5">
+                <div className="w-2.5 h-2.5 rounded-full bg-amber-500 ring-4 ring-amber-500/20"></div>
+                <span className="text-amber-500 font-medium">研究</span>
+              </div>
+              <div className="flex flex-col items-center gap-1.5">
+                <div className="w-2.5 h-2.5 rounded-full bg-amber-500 ring-4 ring-amber-500/40 animate-pulse"></div>
+                <span className="text-white font-semibold">開發</span>
+              </div>
+              <div className="flex flex-col items-center gap-1.5 opacity-40">
+                <div className="w-2.5 h-2.5 rounded-full bg-slate-700"></div>
+                <span>測試</span>
+              </div>
+              <div className="flex flex-col items-center gap-1.5 opacity-40">
+                <div className="w-2.5 h-2.5 rounded-full bg-slate-700"></div>
+                <span>上市</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-slate-950/60 border border-slate-800 rounded-3xl p-5 space-y-2">
+          <span className="text-slate-500 text-xs block">上次停在這裡</span>
+          <p className="text-slate-200 text-sm leading-relaxed font-light">
+            決定使用米製零食作為第一款商品，正在進行配方測試。
+          </p>
+          <span className="text-slate-600 text-[10px] block pt-1">2026/07/12 14:30</span>
+        </div>
+      </div>
+    </>
+  );
+}
+</file>
+
+<file path="app/work/starup/page.tsx">
+import React from 'react';
+import Link from 'next/link';
+
+export default function StartupPage() {
+  return (
+    <>
+      <div className="flex justify-between items-center mt-4 px-2">
+        <Link href="/work" className="text-xl opacity-70 hover:opacity-100">〈</Link>
+        <h1 className="text-xl font-semibold tracking-wide text-slate-200">創業</h1>
+        <div className="flex gap-4 text-xl opacity-70">
+          <button>+</button>
+          <button>•••</button>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto my-4 pr-1 space-y-4" style={{ scrollbarWidth: 'none' }}>
+        {/* 點擊專案前往第 4 頁 */}
+        <Link 
+          href="/work/startup/pet-souvenir" 
+          className="block bg-gradient-to-r from-amber-600/20 to-orange-900/40 border border-orange-500/30 rounded-3xl p-5 flex flex-col justify-between min-h-[140px] relative hover:scale-[1.01] transition-transform"
+        >
+          <span className="absolute top-5 right-5 text-amber-400">★</span>
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">🐾</span>
+            <div>
+              <h3 className="text-lg font-bold text-white">Pet Souvenir</h3>
+              <p className="text-orange-200/60 text-xs mt-0.5">主打寵物的伴手禮產品</p>
+            </div>
+          </div>
+          <div className="flex justify-between items-center mt-4 text-xs text-orange-200/80">
+            <span>進行中</span>
+            <span className="font-semibold text-amber-400">40%</span>
+          </div>
+        </Link>
+
+        <div className="bg-gradient-to-r from-teal-600/20 to-emerald-900/40 border border-emerald-500/20 rounded-3xl p-5 flex flex-col justify-between min-h-[140px] relative">
+          <span className="absolute top-5 right-5 text-amber-400">★</span>
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">🗃️</span>
+            <div>
+              <h3 className="text-lg font-bold text-white">Life HQ</h3>
+              <p className="text-emerald-200/60 text-xs mt-0.5">打造我的人生操作系統</p>
+            </div>
+          </div>
+          <div className="flex justify-between items-center mt-4 text-xs text-emerald-200/80">
+            <span>進行中</span>
+            <span className="font-semibold text-emerald-400">25%</span>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+</file>
+
+<file path="app/work/page.tsx">
+import React from 'react';
+import Link from 'next/link';
+
+export default function WorkPage() {
+  return (
+    <>
+      <div className="flex justify-between items-center mt-4 px-2">
+        <Link href="/" className="text-xl opacity-70 hover:opacity-100">〈</Link>
+        <h1 className="text-xl font-semibold tracking-wide text-slate-200">工作</h1>
+        <button className="text-2xl opacity-70">+</button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto my-4 pr-1 space-y-4" style={{ scrollbarWidth: 'none' }}>
+        <div className="grid grid-cols-2 gap-4 items-start">
+          <div className="space-y-4">
+            <div className="bg-gradient-to-b from-blue-600/30 to-indigo-950/70 backdrop-blur-md rounded-3xl p-5 border border-blue-400/30 shadow-lg flex flex-col justify-between aspect-[3/4]">
+              <div className="text-2xl bg-white/10 w-10 h-10 flex items-center justify-center rounded-xl">📖</div>
+              <div>
+                <h3 className="text-lg font-bold text-white tracking-wide">教學</h3>
+                <p className="text-blue-200/60 text-xs mt-1">每天都在做</p>
+              </div>
+            </div>
+            <div className="bg-gradient-to-b from-cyan-600/20 to-slate-900/80 backdrop-blur-md rounded-3xl p-5 border border-cyan-400/20 shadow-lg flex flex-col justify-between aspect-square">
+              <div className="text-2xl bg-white/10 w-10 h-10 flex items-center justify-center rounded-xl">📋</div>
+              <div>
+                <h3 className="text-base font-bold text-white tracking-wide">行政</h3>
+                <p className="text-cyan-200/60 text-xs mt-0.5">進行中</p>
+              </div>
+            </div>
+          </div>
+          <div className="space-y-4 pt-6">
+            <div className="bg-gradient-to-b from-purple-600/30 to-purple-950/70 backdrop-blur-md rounded-3xl p-5 border border-purple-400/30 shadow-lg flex flex-col justify-between aspect-square relative">
+              <span className="absolute top-4 right-4 text-amber-400 text-xs">★</span>
+              <div className="text-2xl bg-white/10 w-10 h-10 flex items-center justify-center rounded-xl">📝</div>
+              <div>
+                <h3 className="text-base font-bold text-white tracking-wide">論文</h3>
+                <p className="text-purple-200/60 text-xs mt-0.5">進行中</p>
+              </div>
+            </div>
+            {/* 點擊創業前往第 3 頁 */}
+            <Link 
+              href="/work/startup" 
+              className="block bg-gradient-to-b from-orange-600/30 to-amber-950/70 backdrop-blur-md rounded-3xl p-5 border border-orange-400/30 shadow-lg flex flex-col justify-between aspect-[3/4] relative hover:scale-[1.02] transition-transform"
+            >
+              <span className="absolute top-4 right-4 text-amber-400 text-xs">★</span>
+              <div className="text-2xl bg-white/10 w-10 h-10 flex items-center justify-center rounded-xl">💡</div>
+              <div>
+                <h3 className="text-lg font-bold text-white tracking-wide">創業</h3>
+                <p className="text-orange-200/60 text-xs mt-1">持續經營</p>
+              </div>
+            </Link>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+</file>
+
+<file path="app/globals.css">
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+</file>
+
+<file path="app/layout.tsx">
+import type { Metadata } from "next";
+import "./globals.css";
+
+export const metadata: Metadata = {
+  title: "Life HQ - 自動化人生操作系統",
+  description: "Context-Aware AI Workspace",
+};
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <html lang="zh-TW">
+      <body className="bg-slate-950 text-slate-100 min-h-screen antialiased">
+        {children}
+      </body>
+    </html>
+  );
+}
+</file>
+
+<file path="app/page.tsx">
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import { createClient } from '@supabase/supabase-js';
+
+// 1. 初始化 Supabase 用戶端 (防錯機制)
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+const supabase = supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null;
+
+// 2. 定義資料結構與型別
+interface Item {
+  id: string;
+  text: string;
+  completed: boolean;
+  type: 'todo' | 'note';
+  createdAt: string;
+}
+
+interface Project {
+  id: string;
+  name: string;
+  icon: string;
+  color: string;
+  items: Item[];
+}
+
+interface SystemState {
+  projects: Project[];
+  activeProjectId: string | null;
+  activeItemType: 'todo' | 'note';
+}
+
+// 🔥 重點：直接在預設狀態裡「塞入假資料」，確保絕對能渲染出雙面板！
+const defaultState: SystemState = {
+  projects: [
+    {
+      id: 'default-project-1',
+      name: '雲端增強計畫',
+      icon: '⚡',
+      color: 'from-blue-500 to-indigo-500',
+      items: [
+        { id: 'item-1', text: '歡迎來到你的專屬減壓小宇宙', completed: false, type: 'note', createdAt: new Date().toISOString() },
+        { id: 'item-2', text: '你不需要每天都很完美，只要前進就好。', completed: false, type: 'note', createdAt: new Date().toISOString() },
+        { id: 'item-3', text: '在 Supabase 資料庫同步成功前，這裡會顯示預設資料', completed: false, type: 'todo', createdAt: new Date().toISOString() }
+      ]
+    }
+  ],
+  activeProjectId: 'default-project-1',
+  activeItemType: 'note'
+};
+
+export default function Home() {
+  // 3. 狀態初始化 (優先讀取本地快取，否則用包含假資料的預設值)
+  const [systemState, setSystemState] = useState<SystemState>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('life_hq_user_universe_data');
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          // 確保抓出來的資料是有項目的，如果舊資料是空的，一樣強制用假資料
+          if (parsed && Array.isArray(parsed.projects) && parsed.projects.length > 0) {
+            return parsed;
+          }
+        } catch (e) {
+          console.error("解析 LocalStorage 失敗", e);
+        }
+      }
+    }
+    return defaultState;
+  });
+
+  const [newItemText, setNewItemText] = useState('');
+  const [newProjectName, setNewProjectName] = useState('');
+  const [showAddProject, setShowAddProject] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  // 4. 當狀態改變時，自動儲存到 LocalStorage
+  useEffect(() => {
+    localStorage.setItem('life_hq_user_universe_data', JSON.stringify(systemState));
+  }, [systemState]);
+
+  // 5. 從 Supabase 同步資料 (如果連得上的話)
+  useEffect(() => {
+    async function loadSupabaseData() {
+      if (!supabase) return;
+      setIsSyncing(true);
+      try {
+        const { data, error } = await supabase
+          .from('user_universe')
+          .select('content')
+          .single();
+        
+        if (data && data.content) {
+          const parsed = typeof data.content === 'string' ? JSON.parse(data.content) : data.content;
+          if (parsed && parsed.projects && parsed.projects.length > 0) {
+            setSystemState(parsed);
+          }
+        }
+      } catch (err) {
+        console.log("暫時無法連線至 Supabase，使用本地/預設資料儲存", err);
+      } finally {
+        setIsSyncing(false);
+      }
+    }
+    loadSupabaseData();
+  }, []);
+
+  // 取得當前選中的項目
+  const activeProject = systemState.projects.find(p => p.id === systemState.activeProjectId) || systemState.projects[0];
+
+  // 處理切換項目
+  const handleSelectProject = (projectId: string) => {
+    setSystemState(prev => ({ ...prev, activeProjectId: projectId }));
+  };
+
+  // 處理切換 待辦/筆記 分頁
+  const handleTypeChange = (type: 'todo' | 'note') => {
+    setSystemState(prev => ({ ...prev, activeItemType: type }));
+  };
+
+  // 新增項目 (待辦或筆記)
+  const handleAddItem = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newItemText.trim() || !activeProject) return;
+
+    const newItem: Item = {
+      id: `item-${Date.now()}`,
+      text: newItemText.trim(),
+      completed: false,
+      type: systemState.activeItemType,
+      createdAt: new Date().toISOString()
+    };
+
+    setSystemState(prev => ({
+      ...prev,
+      projects: prev.projects.map(p => 
+        p.id === activeProject.id 
+          ? { ...p, items: [newItem, ...p.items] }
+          : p
+      )
+    }));
+    setNewItemText('');
+  };
+
+  // 切換待辦事項勾選狀態
+  const handleToggleTodo = (itemId: string) => {
+    setSystemState(prev => ({
+      ...prev,
+      projects: prev.projects.map(p => ({
+        ...p,
+        items: p.items.map(item => 
+          item.id === itemId ? { ...item, completed: !item.completed } : item
+        )
+      }))
+    }));
+  };
+
+  // 新增專案分類
+  const handleCreateProject = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newProjectName.trim()) return;
+
+    const colors = [
+      'from-pink-500 to-rose-500',
+      'from-purple-500 to-indigo-500',
+      'from-blue-500 to-cyan-500',
+      'from-emerald-500 to-teal-500',
+      'from-amber-500 to-orange-500'
+    ];
+    const randomColor = colors[Math.floor(Math.random() * colors.length)];
+
+    const newProject: Project = {
+      id: `project-${Date.now()}`,
+      name: newProjectName.trim(),
+      icon: '📁',
+      color: randomColor,
+      items: []
+    };
+
+    setSystemState(prev => ({
+      ...prev,
+      projects: [...prev.projects, newProject],
+      activeProjectId: newProject.id
+    }));
+    setNewProjectName('');
+    setShowAddProject(false);
+  };
+
+  // 過濾當前分頁要顯示的內容
+  const filteredItems = activeProject 
+    ? activeProject.items.filter(item => item.type === systemState.activeItemType)
+    : [];
+
+  return (
+    <main className="min-h-screen bg-slate-50 text-slate-800 p-4 md:p-8">
+      <div className="max-w-6xl mx-auto space-y-6">
+        
+        {/* 頂部標題與狀態列 */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+          <div>
+            <h1 className="text-2xl font-bold bg-gradient-to-r from-indigo-600 to-violet-600 bg-clip-text text-transparent">
+              今日雲端增強計畫
+            </h1>
+            <p className="text-sm text-slate-500 mt-1">時光便籤壁 · 您的專屬減壓小宇宙</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium ${supabase ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+              <span className={`h-2 w-2 rounded-full ${supabase ? 'bg-emerald-500' : 'bg-amber-400 animate-pulse'}`}></span>
+              {supabase ? (isSyncing ? '雲端同步中...' : 'LINE 即時同步中') : '本地快取模式'}
+            </span>
+          </div>
+        </div>
+
+        {/* 💡 提示操作列 */}
+        <div className="bg-indigo-50/60 border border-indigo-100/80 rounded-xl p-4 text-sm text-indigo-700 flex items-center gap-2">
+          <span>⚡ 點擊左側方塊，右側面板會即時切換待辦與筆記</span>
+        </div>
+
+        {/* 核心雙面板排版佈局 */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+          
+          {/* 左側面板：專案項目方塊 (佔 5 格) */}
+          <div className="lg:col-span-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-slate-700">分類項目</h2>
+              <button 
+                onClick={() => setShowAddProject(!showAddProject)}
+                className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-2.5 py-1.5 rounded-lg font-medium transition"
+              >
+                {showAddProject ? '取消新增' : '+ 新增分類'}
+              </button>
+            </div>
+
+            {/* 新增分類表單 */}
+            {showAddProject && (
+              <form onSubmit={handleCreateProject} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-3">
+                <input 
+                  type="text"
+                  placeholder="輸入新分類名稱..."
+                  value={newProjectName}
+                  onChange={(e) => setNewProjectName(e.target.value)}
+                  className="w-full text-sm px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  maxLength={20}
+                  required
+                />
+                <button type="submit" className="w-full text-xs bg-slate-800 hover:bg-slate-900 text-white py-2 rounded-lg font-medium transition">
+                  確認建立
+                </button>
+              </form>
+            )}
+
+            {/* 分類方塊列表 - 強制 grid-cols-1 垂直單列堆疊 */}
+            <div className="grid grid-cols-1 gap-4">
+              {systemState.projects.map((project) => {
+                const isSelected = activeProject?.id === project.id;
+                const todoCount = project.items.filter(i => i.type === 'todo' && !i.completed).length;
+                const noteCount = project.items.filter(i => i.type === 'note').length;
+
+                return (
+                  <button
+                    key={project.id}
+                    onClick={() => handleSelectProject(project.id)}
+                    className={`w-full text-left p-5 rounded-2xl border transition-all duration-200 bg-white shadow-sm ${
+                      isSelected 
+                        ? 'border-indigo-600 ring-2 ring-indigo-600/10' 
+                        : 'border-slate-100 hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${project.color} text-white flex items-center justify-center text-lg shadow-sm`}>
+                          {project.icon}
+                        </div>
+                        <div>
+                          <h3 className="font-semibold text-slate-800">{project.name}</h3>
+                          <div className="flex items-center gap-2 mt-1 text-xs text-slate-400">
+                            <span>📋 {todoCount} 待辦</span>
+                            <span>·</span>
+                            <span>✍️ {noteCount} 筆記</span>
+                          </div>
+                        </div>
+                      </div>
+                      {isSelected && (
+                        <span className="text-xs bg-indigo-50 text-indigo-600 font-semibold px-2.5 py-1 rounded-full border border-indigo-100">
+                          已選取
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 右側面板：詳細內容與新增區 (佔 7 格) */}
+          <div className="lg:col-span-7 bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
+            {activeProject ? (
+              <div>
+                {/* 右側面板頭部：分頁切換 */}
+                <div className="bg-slate-50/70 p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-slate-700 text-base">{activeProject.name}</span>
+                  </div>
+                  
+                  {/* 待辦 / 筆記 切換 Tab */}
+                  <div className="flex bg-slate-200/60 p-1 rounded-xl w-fit">
+                    <button
+                      onClick={() => handleTypeChange('note')}
+                      className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition ${
+                        systemState.activeItemType === 'note'
+                          ? 'bg-white text-slate-800 shadow-sm'
+                          : 'text-slate-500 hover:text-slate-800'
+                      }`}
+                    >
+                      ✍️ 隨手筆記
+                    </button>
+                    <button
+                      onClick={() => handleTypeChange('todo')}
+                      className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition ${
+                        systemState.activeItemType === 'todo'
+                          ? 'bg-white text-slate-800 shadow-sm'
+                          : 'text-slate-500 hover:text-slate-800'
+                      }`}
+                    >
+                      📋 待辦清單
+                    </button>
+                  </div>
+                </div>
+
+                {/* 內容輸入區 */}
+                <div className="p-6 border-b border-slate-100">
+                  <form onSubmit={handleAddItem} className="flex gap-2">
+                    <input
+                      type="text"
+                      placeholder={systemState.activeItemType === 'todo' ? "新增待辦事項..." : "寫點生活筆記、減壓小語..."}
+                      value={newItemText}
+                      onChange={(e) => setNewItemText(e.target.value)}
+                      className="flex-1 text-sm px-4 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-slate-50/50"
+                      required
+                    />
+                    <button
+                      type="submit"
+                      className="px-5 py-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-sm font-medium transition shadow-sm shrink-0"
+                    >
+                      新增
+                    </button>
+                  </form>
+                </div>
+
+                {/* 列表渲染區 */}
+                <div className="p-6 min-h-[300px] max-h-[500px] overflow-y-auto space-y-3">
+                  {filteredItems.length === 0 ? (
+                    <div className="text-center py-12 text-slate-400 text-sm">
+                      <div className="text-3xl mb-2">🍃</div>
+                      目前還沒有任何{systemState.activeItemType === 'todo' ? '待辦事項' : '筆記'}喔，立刻在上方新增一個吧！
+                    </div>
+                  ) : (
+                    filteredItems.map((item) => (
+                      <div 
+                        key={item.id} 
+                        className={`p-4 rounded-xl border text-sm transition-all flex items-start gap-3 ${
+                          item.completed 
+                            ? 'bg-slate-50/80 border-slate-100 text-slate-400 line-through' 
+                            : 'bg-white border-slate-100 hover:border-slate-200 shadow-sm'
+                        }`}
+                      >
+                        {systemState.activeItemType === 'todo' && (
+                          <input
+                            type="checkbox"
+                            checked={item.completed}
+                            onChange={() => handleToggleTodo(item.id)}
+                            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                          />
+                        )}
+                        <span className="flex-1 break-words">{item.text}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+              </div>
+            ) : (
+              <div className="text-center py-24 text-slate-400 text-sm">
+                請先建立或選取左側的一個項目分類
+              </div>
+            )}
+          </div>
+
+        </div>
+
+      </div>
+    </main>
+  );
+}
+</file>
+
+<file path="components/home/DomainCard.tsx">
+import Button from "@/components/ui/Button";
+import DomainIcon from "./DomainIcon";
+import { colorClasses, domainCardClasses, type DomainTone } from "@/lib/design/colors";
+import { spacing } from "@/lib/design/spacing";
+
+type DomainCardProps = {
+  label: string;
+  tone: DomainTone;
+};
+
+export default function DomainCard({ label, tone }: DomainCardProps) {
+  return (
+    <Button
+      type="button"
+      className={`flex-col items-start justify-between ${domainCardClasses[tone]} ${spacing.domainCard}`}
+      aria-label={`Enter ${label}`}
+    >
+      <DomainIcon tone={tone} />
+      <span className={`text-[28px] font-medium leading-none tracking-[-0.03em] ${colorClasses.inverseText}`}>
+        {label}
+      </span>
+    </Button>
+  );
+}
+</file>
+
+<file path="components/home/DomainIcon.tsx">
+import type { DomainTone } from "@/lib/design/colors";
+
+type DomainIconProps = {
+  tone: DomainTone;
+};
+
+export default function DomainIcon({ tone }: DomainIconProps) {
+  const commonProps = {
+    className: "h-9 w-9 text-white",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.8,
+    viewBox: "0 0 24 24",
+    "aria-hidden": true,
+  } as const;
+
+  if (tone === "work") {
+    return <svg {...commonProps}><rect x="3.5" y="7.5" width="17" height="12" rx="2" /><path d="M8 7.5V5.75c0-.69.56-1.25 1.25-1.25h5.5c.69 0 1.25.56 1.25 1.25V7.5M3.5 12h17M10 12v2h4v-2" /></svg>;
+  }
+
+  if (tone === "personal") {
+    return <svg {...commonProps}><path strokeLinecap="round" strokeLinejoin="round" d="m3.5 10 8.5-6.5 8.5 6.5v9a1 1 0 0 1-1 1h-5.5v-5.5h-3V20H4.5a1 1 0 0 1-1-1v-9Z" /></svg>;
+  }
+
+  if (tone === "research") {
+    return <svg {...commonProps}><path strokeLinecap="round" strokeLinejoin="round" d="M12 3.5v3M12 17.5v3M3.5 12h3M17.5 12h3M5.99 5.99l2.12 2.12M15.89 15.89l2.12 2.12M18.01 5.99l-2.12 2.12M8.11 15.89l-2.12 2.12" /><circle cx="12" cy="12" r="3.5" /></svg>;
+  }
+
+  return <svg {...commonProps}><path strokeLinecap="round" strokeLinejoin="round" d="M13.1 3.75c2.89.47 5.19 2.77 5.66 5.66l.34 2.08-4.18 4.18-2.08-.34a6.83 6.83 0 0 1-5.66-5.66l-.34-2.08 4.18-4.18 2.08.34ZM8.25 15.75l-2.5 2.5M14.75 9.25h.01" /></svg>;
+}
+</file>
+
+<file path="components/home/HomeNavigation.tsx">
+import type { ReactNode } from "react";
+import IconButton from "@/components/ui/IconButton";
+import { colorClasses } from "@/lib/design/colors";
+import { spacing } from "@/lib/design/spacing";
+
+type NavigationItem = {
+  label: string;
+  active: boolean;
+  icon: ReactNode;
+};
+
+const navigationItems: NavigationItem[] = [
+  {
+    label: "Home",
+    active: true,
+    icon: (
+      <svg viewBox="0 0 24 24" fill="currentColor" className="h-6 w-6">
+        <path d="M12 3l9 8v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1V11l9-8z" />
+      </svg>
+    ),
+  },
+  {
+    label: "Chat",
+    active: false,
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" className="h-6 w-6">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h8M8 14h5M21 12c0 4.418-4.03 8-9 8a9.86 9.86 0 0 1-2.55-.33L3 21l1.33-5.45A8.96 8.96 0 0 1 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+      </svg>
+    ),
+  },
+  {
+    label: "Profile",
+    active: false,
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" className="h-6 w-6">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 1 0 8z" />
+      </svg>
+    ),
+  },
+];
+
+export default function HomeNavigation() {
+  return (
+    <nav aria-label="Main navigation" className={`fixed bottom-[max(0.75rem,env(safe-area-inset-bottom))] left-1/2 z-20 w-[calc(100%-3rem)] max-w-[25rem] -translate-x-1/2 rounded-[1.5rem] ${colorClasses.translucentNavigation} ${spacing.navigation}`}>
+      <ul className="flex items-center justify-around">
+        {navigationItems.map(({ label, active, icon }) => (
+          <li key={label}>
+            <IconButton type="button" active={active} aria-current={active ? "page" : undefined}>
+              {icon}
+              <span className="text-[11px] font-medium">{label}</span>
+            </IconButton>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  );
+}
+</file>
+
+<file path="components/home/HomePage.tsx">
+import Image from "next/image";
+import Page from "@/components/ui/Page";
+import Section from "@/components/ui/Section";
+import { colorClasses } from "@/lib/design/colors";
+import { spacing } from "@/lib/design/spacing";
+import DomainCard from "./DomainCard";
+import HomeNavigation from "./HomeNavigation";
+
+const domains = [
+  { label: "Work", tone: "work" },
+  { label: "Personal", tone: "personal" },
+  { label: "Research", tone: "research" },
+  { label: "Startup", tone: "startup" },
+] as const;
+
+export default function HomePage() {
+  return (
+    <div className="min-h-dvh bg-[#07111f]">
+      <Page className="overflow-x-hidden bg-[#07111f]">
+        <Image
+          src="/home-background.png"
+          alt=""
+          fill
+          priority
+          className="object-cover opacity-30"
+          sizes="(max-width: 480px) 100vw, 480px"
+        />
+        <div className={`absolute inset-0 ${colorClasses.homeOverlay}`} />
+
+        <main className={`relative z-10 flex flex-1 flex-col ${spacing.page}`}>
+          <header className="flex flex-col">
+            <p className={`text-[15px] font-medium tracking-[0.01em] ${colorClasses.secondaryInverseText}`}>
+              Good morning.
+            </p>
+            <h1 className="mt-2 text-[46px] font-semibold leading-[1.03] tracking-[-0.045em] text-white sm:text-5xl">
+              Life HQ
+            </h1>
+            <p className={`mt-4 max-w-[17rem] text-[15px] leading-relaxed ${colorClasses.mutedInverseText}`}>
+              Your life, at your own pace.
+            </p>
+          </header>
+
+          <Section className={spacing.domainList}>
+            {domains.map((domain) => (
+              <DomainCard key={domain.label} {...domain} />
+            ))}
+          </Section>
+        </main>
+
+        <HomeNavigation />
+      </Page>
+    </div>
+  );
+}
+</file>
+
+<file path="components/ui/Button.tsx">
+import type { ButtonHTMLAttributes } from "react";
+import { radius } from "@/lib/design/radius";
+import { shadow } from "@/lib/design/shadow";
+import { transition } from "@/lib/design/transition";
+
+type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: "domain";
+};
+
+const variantClasses = {
+  domain: [
+    "flex min-h-[156px] w-full items-center text-left border focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white",
+    radius.card,
+    shadow.card,
+    shadow.cardHover,
+    transition.interactive,
+    transition.cardInteraction,
+  ].join(" "),
+} as const;
+
+export default function Button({
+  className,
+  variant = "domain",
+  ...props
+}: ButtonProps) {
+  return (
+    <button
+      className={`${variantClasses[variant]} ${className ?? ""}`}
+      {...props}
+    />
+  );
+}
+</file>
+
+<file path="components/ui/IconButton.tsx">
+import type { ButtonHTMLAttributes } from "react";
+import { colorClasses } from "@/lib/design/colors";
+
+type IconButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+  active?: boolean;
+};
+
+export default function IconButton({
+  active = false,
+  className,
+  ...props
+}: IconButtonProps) {
+  const colorClass = active
+    ? colorClasses.inverseText
+    : colorClasses.mutedInverseText;
+
+  return (
+    <button
+      className={`flex min-h-11 min-w-12 flex-col items-center justify-center gap-1 rounded-2xl transition-colors duration-200 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white ${colorClass} ${className ?? ""}`}
+      {...props}
+    />
+  );
+}
+</file>
+
+<file path="components/ui/Page.tsx">
+import type { HTMLAttributes } from "react";
+
+type PageProps = HTMLAttributes<HTMLDivElement>;
+
+export default function Page({ className, ...props }: PageProps) {
+  return (
+    <div
+      className={`relative mx-auto flex min-h-dvh w-full max-w-md flex-col ${className ?? ""}`}
+      {...props}
+    />
+  );
+}
+</file>
+
+<file path="components/ui/Section.tsx">
+import type { HTMLAttributes } from "react";
+
+type SectionProps = HTMLAttributes<HTMLElement>;
+
+export default function Section({ className, ...props }: SectionProps) {
+  return <section className={className} {...props} />;
+}
+</file>
+
+<file path="docs/design-system.md">
+# Life HQ design system
+
+This system preserves a calm, personal workspace. Reuse its tokens and UI primitives before introducing page-specific styles. Values are defined in `lib/design/` and are intentionally small until multiple pages prove a need for expansion.
+
+## Spacing
+
+- Page content: `px-6 pt-14 pb-28`, growing to `px-8 pt-20` from the small breakpoint
+- Domain list: `mt-14`, `gap-5`, and `pb-8`, increasing gently on larger screens
+- Domain card interior: `p-7`, growing to `p-8` on larger screens
+- Bottom navigation: a fixed, floating control with `px-5 py-2.5`
+
+Keep new layouts mobile-first. Add a spacing token only when the same semantic spacing is used in more than one place.
+
+## Colors
+
+- Canvas: `#ffffff`
+- Foreground: `#171717`
+- Inverse text: white, with `95%` and `85%` opacity for secondary and muted content
+- Domain entrances use muted blue, green, purple, and orange surfaces with low-contrast borders
+- Floating navigation uses solid deep navy with a `10%` opacity white border
+- Home background contrast layer: deep navy at `55%` opacity; use this single layer rather than decorative gradients
+
+Use semantic exports from `lib/design/colors.ts` rather than creating near-duplicate opacity combinations.
+
+## Shadows
+
+- Card resting shadow: `0 14px 34px rgba(0, 0, 0, 0.18)`
+- Card hover shadow: `0 18px 42px rgba(0, 0, 0, 0.22)`
+
+Shadows should stay soft and restrained. Do not use them to create a dashboard-like hierarchy.
+
+## Radius
+
+- Primary card radius: `2.25rem`
+
+Use this generous radius for prominent entry cards. Introduce smaller radii only when a distinct component calls for one.
+
+## Transitions
+
+- Interactive transition: `200ms ease-out`
+- Card feedback: a gentle border change with `0.992` active scale
+
+Keep motion limited to direct interaction feedback. Do not add decorative or continuous animation.
+
+## Shared UI primitives
+
+- `Page` provides the mobile-first page frame.
+- `Section` provides semantic page sections.
+- `Button` owns the shared domain-card action treatment.
+- `IconButton` provides consistent icon navigation states.
+
+Domain-specific components belong beside their page under `components/home/`; page-agnostic primitives belong in `components/ui/`.
+</file>
+
+<file path="lib/design/colors.ts">
+export const colors = {
+  canvas: "#ffffff",
+  foreground: "#171717",
+  inverse: "#ffffff",
+} as const;
+
+export const colorClasses = {
+  homeOverlay: "bg-[#07111f]/55",
+  inverseText: "text-white",
+  mutedInverseText: "text-white/85",
+  secondaryInverseText: "text-white/95",
+  translucentNavigation: "border border-white/10 bg-[#07111f]",
+} as const;
+
+export const domainCardClasses = {
+  work: "border-[#9bb8f6]/25 bg-[#3f62ac]/75 hover:bg-[#496db8]/80",
+  personal: "border-[#8ccfc3]/25 bg-[#1f655f]/75 hover:bg-[#28736b]/80",
+  research: "border-[#c3a8e4]/25 bg-[#69508e]/75 hover:bg-[#755c9d]/80",
+  startup: "border-[#efbf96]/25 bg-[#a36538]/75 hover:bg-[#b27140]/80",
+} as const;
+
+export type DomainTone = keyof typeof domainCardClasses;
+</file>
+
+<file path="lib/design/radius.ts">
+export const radius = {
+  card: "rounded-[2.25rem]",
+} as const;
+</file>
+
+<file path="lib/design/shadow.ts">
+export const shadow = {
+  card: "shadow-[0_14px_34px_rgba(0,0,0,0.18)]",
+  cardHover: "hover:shadow-[0_18px_42px_rgba(0,0,0,0.22)]",
+} as const;
+</file>
+
+<file path="lib/design/spacing.ts">
+export const spacing = {
+  page: "px-6 pb-28 pt-14 sm:px-8 sm:pt-20",
+  domainList: "mt-14 flex flex-col gap-5 pb-8 sm:mt-16 sm:gap-6",
+  navigation: "px-5 py-2.5",
+  domainCard: "p-7 sm:p-8",
+} as const;
+</file>
+
+<file path="lib/design/transition.ts">
+export const transition = {
+  interactive: "transition-[background-color,border-color,box-shadow,transform] duration-200 ease-out",
+  cardInteraction: "hover:border-white/40 active:scale-[0.992]",
+} as const;
+</file>
+
+<file path="public/file.svg">
+<svg fill="none" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M14.5 13.5V5.41a1 1 0 0 0-.3-.7L9.8.29A1 1 0 0 0 9.08 0H1.5v13.5A2.5 2.5 0 0 0 4 16h8a2.5 2.5 0 0 0 2.5-2.5m-1.5 0v-7H8v-5H3v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1M9.5 5V2.12L12.38 5zM5.13 5h-.62v1.25h2.12V5zm-.62 3h7.12v1.25H4.5zm.62 3h-.62v1.25h7.12V11z" clip-rule="evenodd" fill="#666" fill-rule="evenodd"/></svg>
+</file>
+
+<file path="public/globe.svg">
+<svg fill="none" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><g clip-path="url(#a)"><path fill-rule="evenodd" clip-rule="evenodd" d="M10.27 14.1a6.5 6.5 0 0 0 3.67-3.45q-1.24.21-2.7.34-.31 1.83-.97 3.1M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16m.48-1.52a7 7 0 0 1-.96 0H7.5a4 4 0 0 1-.84-1.32q-.38-.89-.63-2.08a40 40 0 0 0 3.92 0q-.25 1.2-.63 2.08a4 4 0 0 1-.84 1.31zm2.94-4.76q1.66-.15 2.95-.43a7 7 0 0 0 0-2.58q-1.3-.27-2.95-.43a18 18 0 0 1 0 3.44m-1.27-3.54a17 17 0 0 1 0 3.64 39 39 0 0 1-4.3 0 17 17 0 0 1 0-3.64 39 39 0 0 1 4.3 0m1.1-1.17q1.45.13 2.69.34a6.5 6.5 0 0 0-3.67-3.44q.65 1.26.98 3.1M8.48 1.5l.01.02q.41.37.84 1.31.38.89.63 2.08a40 40 0 0 0-3.92 0q.25-1.2.63-2.08a4 4 0 0 1 .85-1.32 7 7 0 0 1 .96 0m-2.75.4a6.5 6.5 0 0 0-3.67 3.44 29 29 0 0 1 2.7-.34q.31-1.83.97-3.1M4.58 6.28q-1.66.16-2.95.43a7 7 0 0 0 0 2.58q1.3.27 2.95.43a18 18 0 0 1 0-3.44m.17 4.71q-1.45-.12-2.69-.34a6.5 6.5 0 0 0 3.67 3.44q-.65-1.27-.98-3.1" fill="#666"/></g><defs><clipPath id="a"><path fill="#fff" d="M0 0h16v16H0z"/></clipPath></defs></svg>
+</file>
+
+<file path="public/next.svg">
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 394 80"><path fill="#000" d="M262 0h68.5v12.7h-27.2v66.6h-13.6V12.7H262V0ZM149 0v12.7H94v20.4h44.3v12.6H94v21h55v12.6H80.5V0h68.7zm34.3 0h-17.8l63.8 79.4h17.9l-32-39.7 32-39.6h-17.9l-23 28.6-23-28.6zm18.3 56.7-9-11-27.1 33.7h17.8l18.3-22.7z"/><path fill="#000" d="M81 79.3 17 0H0v79.3h13.6V17l50.2 62.3H81Zm252.6-.4c-1 0-1.8-.4-2.5-1s-1.1-1.6-1.1-2.6.3-1.8 1-2.5 1.6-1 2.6-1 1.8.3 2.5 1a3.4 3.4 0 0 1 .6 4.3 3.7 3.7 0 0 1-3 1.8zm23.2-33.5h6v23.3c0 2.1-.4 4-1.3 5.5a9.1 9.1 0 0 1-3.8 3.5c-1.6.8-3.5 1.3-5.7 1.3-2 0-3.7-.4-5.3-1s-2.8-1.8-3.7-3.2c-.9-1.3-1.4-3-1.4-5h6c.1.8.3 1.6.7 2.2s1 1.2 1.6 1.5c.7.4 1.5.5 2.4.5 1 0 1.8-.2 2.4-.6a4 4 0 0 0 1.6-1.8c.3-.8.5-1.8.5-3V45.5zm30.9 9.1a4.4 4.4 0 0 0-2-3.3 7.5 7.5 0 0 0-4.3-1.1c-1.3 0-2.4.2-3.3.5-.9.4-1.6 1-2 1.6a3.5 3.5 0 0 0-.3 4c.3.5.7.9 1.3 1.2l1.8 1 2 .5 3.2.8c1.3.3 2.5.7 3.7 1.2a13 13 0 0 1 3.2 1.8 8.1 8.1 0 0 1 3 6.5c0 2-.5 3.7-1.5 5.1a10 10 0 0 1-4.4 3.5c-1.8.8-4.1 1.2-6.8 1.2-2.6 0-4.9-.4-6.8-1.2-2-.8-3.4-2-4.5-3.5a10 10 0 0 1-1.7-5.6h6a5 5 0 0 0 3.5 4.6c1 .4 2.2.6 3.4.6 1.3 0 2.5-.2 3.5-.6 1-.4 1.8-1 2.4-1.7a4 4 0 0 0 .8-2.4c0-.9-.2-1.6-.7-2.2a11 11 0 0 0-2.1-1.4l-3.2-1-3.8-1c-2.8-.7-5-1.7-6.6-3.2a7.2 7.2 0 0 1-2.4-5.7 8 8 0 0 1 1.7-5 10 10 0 0 1 4.3-3.5c2-.8 4-1.2 6.4-1.2 2.3 0 4.4.4 6.2 1.2 1.8.8 3.2 2 4.3 3.4 1 1.4 1.5 3 1.5 5h-5.8z"/></svg>
+</file>
+
+<file path="public/vercel.svg">
+<svg fill="none" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1155 1000"><path d="m577.3 0 577.4 1000H0z" fill="#fff"/></svg>
+</file>
+
+<file path="public/window.svg">
+<svg fill="none" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path fill-rule="evenodd" clip-rule="evenodd" d="M1.5 2.5h13v10a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1zM0 1h16v11.5a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 0 12.5zm3.75 4.5a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5M7 4.75a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0m1.75.75a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5" fill="#666"/></svg>
+</file>
+
+<file path=".gitignore">
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+</file>
+
+<file path="AGENTS.md">
+<!-- BEGIN:nextjs-agent-rules -->
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
+<!-- END:nextjs-agent-rules -->
+</file>
+
+<file path="CLAUDE.md">
+@AGENTS.md
+</file>
+
+<file path="eslint.config.mjs">
+import { defineConfig, globalIgnores } from "eslint/config";
+import nextVitals from "eslint-config-next/core-web-vitals";
+import nextTs from "eslint-config-next/typescript";
+
+const eslintConfig = defineConfig([
+  ...nextVitals,
+  ...nextTs,
+  // Override default ignores of eslint-config-next.
+  globalIgnores([
+    // Default ignores of eslint-config-next:
+    ".next/**",
+    "out/**",
+    "build/**",
+    "next-env.d.ts",
+  ]),
+]);
+
+export default eslintConfig;
+</file>
+
+<file path="next.config.ts">
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  /* config options here */
+};
+
+export default nextConfig;
+</file>
+
+<file path="package.json">
+{
+  "name": "life-hq",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.110.6",
+    "next": "16.2.10",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.10",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
+</file>
+
+<file path="postcss.config.mjs">
+const config = {
+  plugins: {
+    "@tailwindcss/postcss": {},
+  },
+};
+
+export default config;
+</file>
+
+<file path="README.md">
+This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+
+## Getting Started
+
+First, run the development server:
+
+```bash
+npm run dev
+# or
+yarn dev
+# or
+pnpm dev
+# or
+bun dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+
+You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+
+This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+
+## Learn More
+
+To learn more about Next.js, take a look at the following resources:
+
+- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
+- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+
+You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+
+## Deploy on Vercel
+
+The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+
+Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+</file>
+
+<file path="tsconfig.json">
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/*": ["./*"]
+    }
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts",
+    "**/*.mts"
+  ],
+  "exclude": ["node_modules"]
+}
+</file>
+
+</files>
