@@ -5,15 +5,16 @@ import Link from "next/link";
 import { DOMAINS } from "@/lib/domains";
 import { WORDS } from "@/lib/words";
 import { useTopics } from "@/lib/useTopics";
-import type { DomainId } from "@/lib/types";
+import { useNotes } from "@/lib/useNotes";
+import { formatTime } from "@/lib/format";
 
 const displayFont = { fontFamily: "'Baloo 2', sans-serif" };
 
 export default function Home() {
-  const { topics, addTopic } = useTopics();
+  const { topics } = useTopics();
+  const { notes, addNote, removeNote } = useNotes();
   const [wordIndex, setWordIndex] = useState(0);
   const [draft, setDraft] = useState("");
-  const [draftDomain, setDraftDomain] = useState<DomainId>("personal");
   const inputRef = useRef<HTMLInputElement>(null);
 
   function nextWord() {
@@ -26,7 +27,7 @@ export default function Home() {
     e.preventDefault();
     const text = draft.trim();
     if (!text) return;
-    addTopic({ domain: draftDomain, title: text });
+    addNote(text);
     setDraft("");
     inputRef.current?.focus();
   }
@@ -34,14 +35,33 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-white">
       <div className="mx-auto max-w-2xl px-6 py-10 lg:max-w-4xl lg:px-10 lg:py-14">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.35em] text-slate-400">Life HQ</p>
-        <h1 className="mt-2 text-[38px] leading-tight text-slate-800" style={displayFont}>
-          今天，從哪裡開始？
-        </h1>
-        <p className="mt-2 text-sm">
-          <span className="bg-gradient-to-r from-sky-500 via-rose-500 to-violet-500 bg-clip-text text-transparent font-medium">工作 · 生活 · 創業</span>
-          <span className="text-slate-400"> —— 都在這裡，一個一個來</span>
-        </p>
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.35em] text-slate-400">Life HQ</p>
+            <h1 className="mt-2 text-[38px] leading-tight text-slate-800" style={displayFont}>
+              今天，從哪裡開始？
+            </h1>
+            <p className="mt-2 text-sm">
+              <span className="bg-gradient-to-r from-sky-500 via-rose-500 to-violet-500 bg-clip-text text-transparent font-medium">工作 · 生活 · 創業</span>
+              <span className="text-slate-400"> —— 都在這裡，一個一個來</span>
+            </p>
+          </div>
+
+          <div className="w-full rounded-2xl border border-slate-200 bg-white p-5 shadow-sm lg:w-72 lg:shrink-0">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">今日單字</span>
+              <button onClick={nextWord} className="text-xs text-slate-500 transition hover:text-slate-700 hover:underline underline-offset-2">
+                換一個 ↻
+              </button>
+            </div>
+            <div className="mt-2 flex items-baseline gap-3">
+              <span className="text-2xl text-slate-800" style={displayFont}>
+                {WORDS[wordIndex].en}
+              </span>
+              <span className="text-base text-slate-400">{WORDS[wordIndex].th}</span>
+            </div>
+          </div>
+        </div>
 
         {/* Domain cards */}
         <div className="mb-6 mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -62,38 +82,9 @@ export default function Home() {
           ))}
         </div>
 
-        {/* Word of the day + quick capture */}
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm lg:col-span-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">今日單字</span>
-              <button onClick={nextWord} className="text-xs text-slate-500 transition hover:text-slate-700 hover:underline underline-offset-2">
-                換一個 ↻
-              </button>
-            </div>
-            <div className="mt-2 flex items-baseline gap-3">
-              <span className="text-2xl text-slate-800" style={displayFont}>
-                {WORDS[wordIndex].en}
-              </span>
-              <span className="text-base text-slate-400">{WORDS[wordIndex].th}</span>
-            </div>
-          </div>
-
-          <form onSubmit={handleCapture} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm lg:col-span-3">
-            <div className="mb-3 flex flex-wrap gap-1.5">
-              {DOMAINS.map((d) => (
-                <button
-                  key={d.id}
-                  type="button"
-                  onClick={() => setDraftDomain(d.id)}
-                  className={`rounded-full px-2.5 py-1 text-xs transition-all duration-150 hover:scale-105 active:scale-95 ${
-                    draftDomain === d.id ? d.chip : "text-slate-400 hover:text-slate-600"
-                  }`}
-                >
-                  {d.label}
-                </button>
-              ))}
-            </div>
+        {/* Sticky notes: quick, freeform capture that isn't tied to a domain */}
+        <div>
+          <form onSubmit={handleCapture} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
             <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 py-1.5 pl-4 pr-1.5 transition-colors focus-within:border-slate-300">
               <input
                 ref={inputRef}
@@ -110,6 +101,24 @@ export default function Home() {
               </button>
             </div>
           </form>
+
+          {notes.length > 0 && (
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {notes.map((n) => (
+                <div key={n.id} className="group relative rounded-2xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
+                  <button
+                    onClick={() => removeNote(n.id)}
+                    aria-label="刪除便利貼"
+                    className="absolute right-2 top-2 text-slate-300 opacity-0 transition hover:text-slate-500 group-hover:opacity-100"
+                  >
+                    ✕
+                  </button>
+                  <p className="pr-4 text-sm leading-relaxed text-slate-700">{n.text}</p>
+                  <p className="mt-2 font-mono text-[10px] uppercase tracking-wider text-amber-600/70">{formatTime(n.createdAt)}</p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -10,3 +10,9 @@ export interface Topic {
   pinned: boolean;
   updatedAt: string;
 }
+
+export interface StickyNote {
+  id: string;
+  text: string;
+  createdAt: string;
+}
