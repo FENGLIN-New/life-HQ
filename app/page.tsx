@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { DOMAINS } from "@/lib/domains";
 import { WORDS } from "@/lib/words";
@@ -10,12 +10,26 @@ import { formatTime } from "@/lib/format";
 
 const displayFont = { fontFamily: "'Baloo 2', sans-serif" };
 
+// Same word all day (stable across refreshes), rotates to a new one the next day.
+function todaysWordIndex() {
+  const now = new Date();
+  const startOfYear = new Date(now.getFullYear(), 0, 0);
+  const dayOfYear = Math.floor((now.getTime() - startOfYear.getTime()) / 86400000);
+  return dayOfYear % WORDS.length;
+}
+
 export default function Home() {
   const { topics } = useTopics();
   const { notes, addNote, removeNote } = useNotes();
+  // Starts at a fixed index for SSR, then locks to today's word once mounted on the client
+  // (avoids a server/client hydration mismatch from using the current date too early).
   const [wordIndex, setWordIndex] = useState(0);
   const [draft, setDraft] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setWordIndex(todaysWordIndex());
+  }, []);
 
   function nextWord() {
     let i = Math.floor(Math.random() * WORDS.length);

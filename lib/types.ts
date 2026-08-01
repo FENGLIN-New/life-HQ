@@ -8,7 +8,10 @@ export interface Topic {
   chatLink: string;
   reminderAt: string;
   pinned: boolean;
+  createdAt: string;
   updatedAt: string;
+  history: string[];
+  order: number;
 }
 
 export interface StickyNote {

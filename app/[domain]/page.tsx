@@ -6,17 +6,20 @@ import { useParams } from "next/navigation";
 import { domainMeta, isDomainId } from "@/lib/domains";
 import { useTopics } from "@/lib/useTopics";
 import TopicCard from "@/components/TopicCard";
+import type { Topic } from "@/lib/types";
 
 const displayFont = { fontFamily: "'Baloo 2', sans-serif" };
 
 export default function DomainPage() {
   const { domain } = useParams<{ domain: string }>();
-  const { topics, addTopic, updateTopic, togglePin } = useTopics();
+  const { topics, addTopic, updateTopic, togglePin, removeTopic, reorderTopics } = useTopics();
   const [showAddForm, setShowAddForm] = useState(false);
   const [formTitle, setFormTitle] = useState("");
   const [formLink, setFormLink] = useState("");
   const [formNote, setFormNote] = useState("");
   const [formReminder, setFormReminder] = useState("");
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [overId, setOverId] = useState<string | null>(null);
 
   if (!isDomainId(domain)) {
     return (
@@ -31,8 +34,50 @@ export default function DomainPage() {
 
   const meta = domainMeta(domain);
   const domainTopics = topics.filter((t) => t.domain === meta.id);
-  const pinned = domainTopics.filter((t) => t.pinned).sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-  const rest = domainTopics.filter((t) => !t.pinned).sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  const pinned = domainTopics.filter((t) => t.pinned).sort((a, b) => b.order - a.order);
+  const rest = domainTopics.filter((t) => !t.pinned).sort((a, b) => b.order - a.order);
+
+  // Drag-to-reorder within a group (pinned cards only reorder among themselves, same for the rest).
+  // Uses Pointer Events (not native HTML5 drag) so it also works on touch.
+  function handleDragPointerDown(id: string) {
+    return (e: React.PointerEvent) => {
+      e.preventDefault();
+      setDragId(id);
+      try {
+        (e.target as Element).setPointerCapture(e.pointerId);
+      } catch {
+        // Some browsers reject capture for edge cases (e.g. already-released pointers);
+        // dragging still works via document-level coordinates, just without capture.
+      }
+    };
+  }
+
+  function handleDragPointerMove(list: Topic[]) {
+    return (e: React.PointerEvent) => {
+      if (!dragId) return;
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      const cardEl = el?.closest("[data-topic-id]") as HTMLElement | null;
+      const id = cardEl?.dataset.topicId;
+      if (id && list.some((t) => t.id === id)) setOverId(id);
+    };
+  }
+
+  function handleDragPointerUp(list: Topic[]) {
+    return () => {
+      if (dragId && overId && dragId !== overId) {
+        const ids = list.map((t) => t.id);
+        const from = ids.indexOf(dragId);
+        const to = ids.indexOf(overId);
+        if (from !== -1 && to !== -1) {
+          ids.splice(from, 1);
+          ids.splice(to, 0, dragId);
+          reorderTopics(ids);
+        }
+      }
+      setDragId(null);
+      setOverId(null);
+    };
+  }
 
   function handleAddTopic(e: React.FormEvent) {
     e.preventDefault();
@@ -113,7 +158,21 @@ export default function DomainPage() {
             <p className="mb-2 font-mono text-[10px] uppercase tracking-wider text-slate-400">已釘選</p>
             <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
               {pinned.map((t) => (
-                <TopicCard key={t.id} topic={t} meta={meta} onTogglePin={togglePin} onUpdate={updateTopic} />
+                <TopicCard
+                  key={t.id}
+                  topic={t}
+                  meta={meta}
+                  onTogglePin={togglePin}
+                  onUpdate={updateTopic}
+                  onRemove={removeTopic}
+                  isDragging={dragId === t.id}
+                  isDragOver={overId === t.id && dragId !== null && dragId !== t.id}
+                  dragHandleProps={{
+                    onPointerDown: handleDragPointerDown(t.id),
+                    onPointerMove: handleDragPointerMove(pinned),
+                    onPointerUp: handleDragPointerUp(pinned),
+                  }}
+                />
               ))}
             </div>
           </div>
@@ -125,7 +184,23 @@ export default function DomainPage() {
               這個領域還沒有紀錄，點上面加一個吧。
             </div>
           ) : (
-            rest.map((t) => <TopicCard key={t.id} topic={t} meta={meta} onTogglePin={togglePin} onUpdate={updateTopic} />)
+            rest.map((t) => (
+              <TopicCard
+                key={t.id}
+                topic={t}
+                meta={meta}
+                onTogglePin={togglePin}
+                onUpdate={updateTopic}
+                onRemove={removeTopic}
+                isDragging={dragId === t.id}
+                isDragOver={overId === t.id && dragId !== null && dragId !== t.id}
+                dragHandleProps={{
+                  onPointerDown: handleDragPointerDown(t.id),
+                  onPointerMove: handleDragPointerMove(rest),
+                  onPointerUp: handleDragPointerUp(rest),
+                }}
+              />
+            ))
           )}
         </div>
       </div>
